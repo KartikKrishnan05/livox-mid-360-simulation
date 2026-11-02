@@ -34,11 +34,12 @@
       </visual>
 
       <!-- Dense depth render, sampled along the Mid-360 pattern by the system below.
-           1440 x 160 = 0.25 deg x 0.377 deg over 360 x -7.5..52.5 deg. -->
+           1440 x 160 = 0.25 deg x 0.377 deg over 360 x -7.5..52.5 deg, rendered at 50 Hz:
+           each pattern point uses the render nearest its own timestamp (motion skew). -->
       <sensor name="livox_dense" type="gpu_lidar">
         <pose>0 0 0.047 0 0 0</pose>
         <topic>/livox/dense_scan</topic>
-        <update_rate>10</update_rate>
+        <update_rate>50</update_rate>
         <always_on>true</always_on>
         <visualize>false</visualize>
         <lidar>

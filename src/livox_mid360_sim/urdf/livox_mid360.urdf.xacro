@@ -15,7 +15,7 @@
     params="parent xyz:='0 0 0' rpy:='0 0 0'
             frame_id:=livox_frame
             points_topic:=/livox/points imu_topic:=/livox/imu_raw dense_topic:=/livox/dense_scan
-            point_rate:=200000 frame_rate:=10 imu_rate:=200 dense_rate:=10
+            point_rate:=200000 frame_rate:=10 imu_rate:=200 dense_rate:=50
             dense_h_samples:=1440 dense_v_samples:=160
             pattern_file:=model://livox_mid360/scan_mode/mid360.csv
             range_noise:=0.02 min_range:=0.1 max_range:=70.0 nominal_range:=40.0">

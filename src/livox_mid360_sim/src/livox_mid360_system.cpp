@@ -1,13 +1,17 @@
-// Livox Mid-360 gz-sim system (approach: dense GPU render sampled along the real pattern).
+// Livox Mid-360 gz-sim system (approach 1: dense GPU render sampled along the real pattern).
 //
-// A dense gpu_lidar (e.g. 1440 x 160 over 360 x -7.5..52.5 deg) renders the scene. This
-// system subscribes to its gz.msgs.LaserScan and, for every 100 ms frame, samples the next
-// 20 000 directions of the recorded Mid-360 pattern from it. The result is published as
-// gz.msgs.PointCloudPacked in livox_ros_driver2's 26-byte layout (x,y,z,intensity,tag,line,
-// timestamp[ns]); livox_driver_emulator turns that into CustomMsg.
+// A dense gpu_lidar (e.g. 1440 x 160 over 360 x -7.5..52.5 deg) renders the scene at
+// 50-100 Hz. This system buffers those renders (gz.msgs.LaserScan) and builds one frame of
+// 20 000 points every 100 ms: point i of the recorded Mid-360 pattern is emitted at
+// timebase + i * 5 us and is sampled from the render *nearest its own timestamp*. Each render
+// is expressed in the sensor frame at its render time, so motion skew within a frame is
+// real (to within half a render period). Output: gz.msgs.PointCloudPacked in
+// livox_ros_driver2's 26-byte layout (x,y,z,intensity,tag,line,timestamp[ns]);
+// livox_driver_emulator turns that into CustomMsg.
 #include <algorithm>
 #include <iostream>
 #include <cmath>
+#include <deque>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -35,7 +39,7 @@ public:
     const gz::sim::Entity &, const std::shared_ptr<const sdf::Element> & sdf,
     gz::sim::EntityComponentManager &, gz::sim::EventManager &) override
   {
-    std::cerr << "[livox_mid360] sensor: main - single GPU render per frame (no motion skew)" << std::endl;
+    std::cerr << "[livox_mid360] sensor: approach 1 - dense GPU render at 50 Hz, nearest-render sampling" << std::endl;
     auto get_s = [&](const char * k, const std::string & d) {
         return sdf->HasElement(k) ? sdf->Get<std::string>(k) : d;
       };
@@ -88,24 +92,46 @@ private:
     auto scan = DenseScan::FromMsg(msg);
     if (!scan) {return;}
 
+    if (!renders_.empty() && scan->stamp_ns <= renders_.back()->stamp_ns) {
+      renders_.clear();                                   // world reset / time jump
+      next_timebase_ = -1;
+    }
+    renders_.push_back(scan);
+    if (next_timebase_ < 0) {next_timebase_ = scan->stamp_ns;}
+
     const double dt_ns = 1e9 / point_rate_;
-    const int64_t frame_ns = static_cast<int64_t>(std::llround(1e9 / frame_rate_));
-    if (scan->stamp_ns < last_end_ns_) {last_end_ns_ = -1;}       // world reset
-    if (last_end_ns_ >= 0 && scan->stamp_ns - last_end_ns_ < frame_ns / 2) {return;}
+    const int64_t frame_ns = static_cast<int64_t>(std::llround(points_per_frame_ * dt_ns));
+    // A frame can be built once a render at/after its last point exists: no later render
+    // can be nearer to any of its points.
+    while (true) {
+      const int64_t t_last =
+        next_timebase_ + static_cast<int64_t>(std::llround((points_per_frame_ - 1) * dt_ns));
+      if (renders_.back()->stamp_ns < t_last) {break;}
+      BuildAndPublish(next_timebase_, dt_ns);
+      next_timebase_ += frame_ns;
+      // Keep the newest render before the next frame starts (it may be the nearest).
+      while (renders_.size() > 1 && renders_[1]->stamp_ns <= next_timebase_) {
+        renders_.pop_front();
+      }
+    }
+  }
 
-    // The frame ends at the render time; like the real driver, it is published once its
-    // last point has been measured, stamped with the time of its first point.
-    const int64_t timebase =
-      scan->stamp_ns - static_cast<int64_t>(std::llround((points_per_frame_ - 1) * dt_ns));
-    if (timebase < 0) {return;}
-    last_end_ns_ = scan->stamp_ns;
-
+  void BuildAndPublish(int64_t timebase, double dt_ns)
+  {
     points_.clear();
     points_.reserve(points_per_frame_);
+    std::size_t k = 0;                              // index of the current nearest render
     for (std::size_t i = 0; i < points_per_frame_; ++i) {
+      const int64_t t = timebase + static_cast<int64_t>(std::llround(i * dt_ns));
+      while (k + 1 < renders_.size() &&
+        std::llabs(renders_[k + 1]->stamp_ns - t) <= std::llabs(renders_[k]->stamp_ns - t))
+      {
+        ++k;
+      }
+      const DenseScan & scan = *renders_[k];
       const PatternRay & ray = pattern_[cursor_ + i];
       double r, retro;
-      if (!scan->Sample(ray.az, ray.el, edge_threshold_, r, retro)) {continue;}
+      if (!scan.Sample(ray.az, ray.el, edge_threshold_, r, retro)) {continue;}
       float range;
       uint8_t refl;
       if (!model_.Apply(r, retro, range, refl)) {continue;}
@@ -116,11 +142,10 @@ private:
       p.intensity = refl;
       p.tag = 0;
       p.line = ray.line;
-      p.timestamp = static_cast<double>(timebase + std::llround(i * dt_ns));
+      p.timestamp = static_cast<double>(t);
       points_.push_back(p);
     }
     cursor_ = (cursor_ + points_per_frame_) % pattern_.size();
-
     FillPointCloudPacked(out_, points_, frame_id_, timebase);
     pub_.Publish(out_);
   }
@@ -132,7 +157,8 @@ private:
   double point_rate_{200000}, frame_rate_{10}, edge_threshold_{0.1};
   std::size_t points_per_frame_{20000};
   std::size_t cursor_{0};
-  int64_t last_end_ns_{-1};
+  int64_t next_timebase_{-1};
+  std::deque<std::shared_ptr<DenseScan>> renders_;
   ScanPattern pattern_;
   ReturnModel model_;
   std::vector<LivoxPoint> points_;
