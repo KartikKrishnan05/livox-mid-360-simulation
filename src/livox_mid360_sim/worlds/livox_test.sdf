@@ -158,6 +158,17 @@
       </link>
     </model>
 
+    <!-- Mesh: truncated cone (meshes/frustum.obj, 96 triangles), rotated 0.3 rad -->
+    <model name="frustum">
+      <static>true</static>
+      <pose>5.5 -1.5 0 0 0 0.3</pose>
+      <link name="link">
+        <collision name="collision"><geometry><mesh><uri>meshes/frustum.obj</uri></mesh></geometry></collision>
+        <visual name="visual"><geometry><mesh><uri>meshes/frustum.obj</uri></mesh></geometry>
+          <material><ambient>0.5 0.3 0.6 1</ambient><diffuse>0.6 0.4 0.8 1</diffuse></material></visual>
+      </link>
+    </model>
+
     <!-- Ramp: 3 m long, rises ~0.6 m -->
     <model name="ramp">
       <static>true</static>

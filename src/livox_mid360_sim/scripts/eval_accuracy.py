@@ -115,7 +115,46 @@ class Shape:
                     ok = (tt > 1e-9) & (x * x + y * y <= r * r)
                     best = np.where(ok & (tt < best), tt, best)
                 return best
+            if self.kind == 'mesh':
+                return self._mesh(ol, dl)
         raise ValueError(self.kind)
+
+    def _mesh(self, ol, dl, chunk=4096):
+        """Moller-Trumbore against all triangles (meshes here are small)."""
+        v0, e1, e2 = self.size
+        out = np.full(len(dl), np.inf)
+        for a in range(0, len(dl), chunk):
+            o = ol[a:a + chunk, None, :]
+            d = dl[a:a + chunk, None, :]
+            p = np.cross(d, e2[None])
+            det = np.sum(e1[None] * p, axis=2)
+            inv = 1.0 / np.where(np.abs(det) < 1e-12, np.nan, det)
+            tv = o - v0[None]
+            u = np.sum(tv * p, axis=2) * inv
+            q = np.cross(tv, e1[None])
+            v = np.sum(d * q, axis=2) * inv
+            t = np.sum(e2[None] * q, axis=2) * inv
+            ok = (u >= 0) & (v >= 0) & (u + v <= 1) & (t > 1e-9)
+            t = np.where(ok, t, np.inf)
+            out[a:a + chunk] = t.min(axis=1)
+        return out
+
+
+def load_obj(path, scale):
+    vs, fs = [], []
+    for line in open(path):
+        w = line.split()
+        if not w:
+            continue
+        if w[0] == 'v':
+            vs.append([float(x) for x in w[1:4]])
+        elif w[0] == 'f':
+            idx = [int(x.split('/')[0]) - 1 for x in w[1:]]
+            for i in range(1, len(idx) - 1):
+                fs.append((idx[0], idx[i], idx[i + 1]))
+    v = np.array(vs) * scale
+    f = np.array(fs)
+    return v[f[:, 0]], v[f[:, 1]] - v[f[:, 0]], v[f[:, 2]] - v[f[:, 0]]
 
 
 def load_world(path):
@@ -138,6 +177,17 @@ def load_world(path):
                     shapes.append(Shape(name, 'box', cp, sz))
                 elif g.find('sphere') is not None:
                     shapes.append(Shape(name, 'sphere', cp, float(g.find('sphere/radius').text)))
+                elif g.find('mesh') is not None:
+                    uri = g.find('mesh/uri').text.strip()
+                    sc = g.find('mesh/scale')
+                    scale = np.array([float(x) for x in sc.text.split()]) if sc is not None \
+                        else np.ones(3)
+                    mp_ = uri[7:] if uri.startswith('file://') else \
+                        os.path.join(os.path.dirname(os.path.abspath(path)), uri)
+                    if not mp_.lower().endswith('.obj'):
+                        print(f'warning: {name}: only OBJ meshes are evaluated, skipping')
+                        continue
+                    shapes.append(Shape(name, 'mesh', cp, load_obj(mp_, scale)))
                 elif g.find('cylinder') is not None:
                     shapes.append(Shape(name, 'cylinder', cp,
                                         (float(g.find('cylinder/radius').text),
