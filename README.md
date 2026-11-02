@@ -47,7 +47,8 @@ Launch arguments:
 | `spawn_robot` | `true` | `true`: diff-drive test rig (Mid-360 on a 0.45 m mast). `false`: the bare `model://livox_mid360` on a pole, jointed to `livox_mid360::lidar_link`, which is the ignc-kit integration path |
 | `xfer_format` | `1` | `1` = CustomMsg, `0` = PointCloud2 (driver layout) on `/livox/lidar` |
 | `world` | `livox_test.sdf` | world file (absolute path or a name in `share/livox_mid360_sim/worlds`) |
-| `dense_rate` | `10` | render rate of the dense gpu_lidar (approach 1) |
+| `geometry_source` | `collision` | geometry the rays hit: `collision` or `visual` (test rig) |
+| `range_noise` | `0.02` | range noise σ [m] (test rig; `0` for accuracy tests) |
 
 ## Check
 
@@ -145,34 +146,68 @@ The `livox_ros_driver2` message definitions are copied from
 [Livox-SDK/livox_ros_driver2](https://github.com/Livox-SDK/livox_ros_driver2) (MIT, see
 `src/livox_ros_driver2/LICENSE.txt`).
 
-## How the sensor works (this branch: `main`)
+## How the sensor works (branch `approach-2-exact-raycast`)
 
-The model carries a dense `gpu_lidar`: 1440 × 160 rays over 360° × −7.5..52.5°, i.e. 0.25° ×
-0.377°, rendered by ogre2 on the GPU. The `livox_mid360_sim::LivoxMid360` system subscribes to
-its `gz.msgs.LaserScan`. For every 100 ms frame it samples the next 20 000 pattern directions
-from the render:
+There is no `gpu_lidar` on this branch. The `livox_mid360_sim::LivoxMid360` system casts
+**one exact ray per pattern direction** on the CPU:
 
-* **bilinear** in 1/r when the four neighbouring pixels lie on one continuous surface
-  (spread ≤ 10 %), which is exact to first order for planes;
-* **nearest neighbour** at depth edges and hit/miss borders, so no "ghost" points float
-  between foreground and background.
+* **Timing:** every physics step it casts exactly the rays whose timestamps
+  `t0 + i · 5 µs` fall into that step (200 rays per 1 ms step). Each ray starts from the
+  sensor pose **interpolated to its own time** (lerp + slerp between the previous and
+  current step), so motion skew is exact, not tied to a render rate. A frame of 20 000 rays
+  is published the moment its last ray is cast.
+* **Geometry:** a custom ray caster over the shapes read from the ECM. It hits **collision**
+  geometry by default; `<geometry_source>visual</geometry_source>` (launch
+  `geometry_source:=visual`) uses visuals. Box, sphere, cylinder, capsule, ellipsoid and plane
+  are intersected analytically. Meshes go through a per-mesh triangle BVH, loaded with
+  gz-common's MeshManager and cached by uri + scale. A top-level BVH over the world AABBs is
+  rebuilt only when a non-static shape moves. New and removed entities (e.g. a robot spawned
+  later) are picked up automatically. Heightmaps, polylines and cones are skipped with a
+  warning.
+* Rays start at `min_range` from the optical centre, like gz lidars, so the housing is never
+  seen from inside. The robot's own body is visible, as on a real robot.
+* The output contract, return model (detection range, noise, reflectivity) and IMU are
+  identical to approach 1.
 
-The return model then applies the reflectivity-dependent detection range, the range noise and
-`min_range`.
+Plugin parameters (`model.sdf`): `link_name` (`lidar_link`), `frame_offset`
+(`0 0 0.047 0 0 0`: livox_frame relative to the link), `geometry_source`, `frame_id`,
+`points_topic`, `pattern_file`, `point_rate`, `frame_rate`, `min_range`, `max_range`,
+`nominal_range`, `range_noise_stddev`, `default_reflectivity`, `seed`.
 
-**LaserScan layout (verified):** `ranges[v * count + h]`, with `h = 0` at `angle_min`
-(counter-clockwise) and `v = 0` at `vertical_angle_min`. The proof uses the ground plane:
-with this indexing, points below −5.5° land at median z = −0.546 m for a sensor at 0.547 m
-(bare model on its pole) and at −0.716 m for the test rig, whose sensor gz reports at exactly
-0.722 m. A flipped `v` would put those points high above the sensor (the `ground` check in
-`check_livox_cloud.py`). The residual few mm come from depth-render quantization at grazing
-incidence (see Accuracy).
+### Which ray-casting back-end, and why
 
-On `main`, each frame comes from **one** render at the end of the frame, so all 20 000 points
-see the scene as it was at one instant. Timestamps are still spread over 100 ms, but motion
-skew is not modelled. The `approach-1-gpu-pattern` branch renders at 50–100 Hz and gives each
-point the render nearest its own timestamp. The `approach-2-exact-raycast` branch casts one
-exact ray per pattern direction. See the comparison at the end.
+| option (gz-sim 8 / gz-physics 7 / gz-rendering 8) | result |
+|---|---|
+| `components::RaycastData` + Physics system (`GetRayIntersectionFromLastStep`), dartsim with its default ODE collision detector | **does not work**: `Raycast is not supported by 'ode'`, no hits |
+| same, with `<dart><collision_detector>bullet</collision_detector></dart>` | works on collision geometry, but costs **2.6 µs/ray**, serial inside the physics step. 200 k rays/s adds about 0.52 s of CPU per simulated second, and the *whole world's* contact model has to switch to Bullet |
+| gz-rendering `RayQuery` (Ogre2) | one ray per call. The GPU path renders a selection buffer per query (mouse picking); the CPU path does per-object Ogre intersection. It also needs the render thread's scene, which a system plugin doesn't own. Not viable at 200 k rays/s |
+| **custom BVH over ECM geometry** (chosen) | **0.33 µs/ray** single-threaded, exact primitives, meshes supported, no side effects on physics or rendering, collision or visual geometry |
+
+### Measured on this machine (AMD Ryzen 5 2600 Six-Core Processor, GTX 1050 Ti 4 GB)
+
+* **Throughput:** 0.33 µs/ray steady-state. At 200 k rays/s the sensor costs about 133 µs
+  per 1 ms step (about 13 % of one core), including the per-step scene update. Headless at
+  unlimited speed, the world runs 20 s of sim time in 3.6 s without the lidar, 7.7 s with
+  it at 200 k rays/s, and 17.7 s at **2 M rays/s**. That is 10× the Mid-360 rate and still
+  faster than real time, single-threaded.
+* **Full launch** (`benchmark.sh`, test rig): **RTF 1.00, gz server 119 % CPU, no GPU
+  memory** beyond the desktop's. Approach 1 at 50 Hz: RTF 1.00, 212–219 % CPU, about
+  170 MiB GPU.
+* **Accuracy** (`eval_accuracy.py`, `range_noise:=0`): static, 10 frames, 78 594 points:
+  median, p99 and max error are **0.00 mm** on ground, walls, overhang, primitives and the
+  OBJ mesh, with **0 missed and 0 spurious returns**. The evaluator is an independent numpy
+  ray caster over the same SDF, so this shows the gz side (poses, collision extraction,
+  mesh loading, interpolation) adds no error. It is not an independent physical
+  measurement.
+* **Motion skew** (rig spinning at 1 rad/s, truth from the 1 kHz ground-truth pose at each
+  ray's time): **0.00 mm** median and no missed or spurious returns in every quarter of the
+  frame. Truth with one pose per frame is off by 9 / 134 / 197 / 324 mm per quarter, so the
+  skew is fully present and exactly where it should be.
+
+Because it hits **collision** geometry, the cloud shows what physics sees. Where visual
+meshes are detailed and collisions are simplified boxes, the cloud follows the boxes; use
+`geometry_source:=visual` to follow the visual meshes instead, which costs more for big
+meshes. Approach 1 always sees visuals.
 
 ## Accuracy against analytic geometry
 
@@ -185,8 +220,14 @@ ros2 launch livox_mid360_sim sim.launch.py gui:=false rviz:=false range_noise:=0
 ros2 run livox_mid360_sim eval_accuracy.py --frames 20
 ```
 
-It reports the range error per surface (ground, walls, objects), missed returns (truth hits
-within 40 m but no point) and spurious returns (a point where truth hits nothing).
+It reports the range error per surface (ground, walls, overhang, objects), missed returns
+(truth hits within 40 m but no point) and spurious returns (a point where truth hits nothing).
+
+For motion skew, drive the rig (e.g.
+`ros2 topic pub -r 20 /cmd_vel geometry_msgs/msg/Twist "{angular: {z: 1.0}}"`) and run
+`eval_accuracy.py --moving`. Truth is computed from the 1 kHz ground-truth pose
+(`/ground_truth/pose`) at each ray's timestamp. `benchmark.sh "" "geometry_source:=visual"`
+measures RTF, gz CPU% and GPU load per launch configuration.
 
 ## Integration into ignc-kit
 
@@ -201,8 +242,8 @@ within 40 m but no point) and spurious returns (a point where truth hits nothing
      <parent>…your link…</parent><child>livox_mid360::lidar_link</child>
    </joint>
    ```
-   The model origin (`lidar_link`) is the centre of the mounting face. The world needs the
-   `Sensors` system (ogre2) and the `Imu` system. In URDF, use the
+   The model origin (`lidar_link`) is the centre of the mounting face. On this branch the world needs only the `Imu`
+   system for the sensor: no rendering and no `Sensors` system. In URDF, use the
    `urdf/livox_mid360.urdf.xacro` macro instead
    (`<xacro:livox_mid360 parent="…" xyz="…" rpy="…"/>`).
 3. Bridge `/livox/points` and `/livox/imu_raw` (see `config/bridge.yaml`) and run
