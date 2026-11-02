@@ -47,7 +47,9 @@ Launch arguments:
 | `spawn_robot` | `true` | `true`: diff-drive test rig (Mid-360 on a 0.45 m mast). `false`: the bare `model://livox_mid360` on a pole, jointed to `livox_mid360::lidar_link`, which is the ignc-kit integration path |
 | `xfer_format` | `1` | `1` = CustomMsg, `0` = PointCloud2 (driver layout) on `/livox/lidar` |
 | `world` | `livox_test.sdf` | world file (absolute path or a name in `share/livox_mid360_sim/worlds`) |
-| `dense_rate` | `10` | render rate of the dense gpu_lidar (approach 1) |
+| `dense_rate` | `10` | render rate of the dense gpu_lidar (main and approach 1) |
+| `dense_h`, `dense_v` | `1440`, `160` | dense gpu_lidar resolution (main and approach 1) |
+| `range_noise` | `0.02` | range noise σ [m] (test rig; `0` for accuracy tests) |
 
 ## Check
 
@@ -170,9 +172,8 @@ incidence (see Accuracy).
 
 On `main`, each frame comes from **one** render at the end of the frame, so all 20 000 points
 see the scene as it was at one instant. Timestamps are still spread over 100 ms, but motion
-skew is not modelled. The `approach-1-gpu-pattern` branch renders at 50–100 Hz and gives each
-point the render nearest its own timestamp. The `approach-2-exact-raycast` branch casts one
-exact ray per pattern direction. See the comparison at the end.
+skew is not modelled. `main` is the shared base; use one of the two branches below. Each
+branch's README documents its sensor in detail.
 
 ## Accuracy against analytic geometry
 
@@ -185,8 +186,14 @@ ros2 launch livox_mid360_sim sim.launch.py gui:=false rviz:=false range_noise:=0
 ros2 run livox_mid360_sim eval_accuracy.py --frames 20
 ```
 
-It reports the range error per surface (ground, walls, objects), missed returns (truth hits
-within 40 m but no point) and spurious returns (a point where truth hits nothing).
+It reports the range error per surface (ground, walls, overhang, objects), missed returns
+(truth hits within 40 m but no point) and spurious returns (a point where truth hits nothing).
+
+For motion skew, drive the rig (e.g.
+`ros2 topic pub -r 20 /cmd_vel geometry_msgs/msg/Twist "{angular: {z: 1.0}}"`) and run
+`eval_accuracy.py --moving`. Truth is computed from the 1 kHz ground-truth pose
+(`/ground_truth/pose`) at each ray's timestamp. `benchmark.sh "" "range_noise:=0" …`
+measures RTF, gz CPU% and GPU load per launch configuration.
 
 ## Integration into ignc-kit
 
@@ -211,3 +218,40 @@ within 40 m but no point) and spurious returns (a point where truth hits nothing
    `extrinsic_T: [-0.011, -0.02329, 0.04412]`, `extrinsic_R: identity`. The old
    `pointcloud2_to_livox` adapter is no longer needed, because `/livox/lidar` is already a
    CustomMsg with real per-point times and lines.
+
+## Approach 1 vs approach 2
+
+Both branches build with colcon, pass `check_livox_cloud.py` headless in all three modes
+(default, `xfer_format:=0`, bare `model://livox_mid360`), and run with the Gazebo GUI and RViz
+under `teleop_twist_keyboard`. Both produce the same output contract, return model and IMU.
+
+Measured on this machine: AMD Ryzen 5 2600 (6C/12T), GTX 1050 Ti 4 GB, Ubuntu 24.04, test
+world, test rig, `range_noise:=0` for accuracy.
+
+| | **1: dense GPU render + pattern sampling** (`approach-1-gpu-pattern`) | **2: exact ray per pattern direction** (`approach-2-exact-raycast`) |
+|---|---|---|
+| Scan pattern | real CSV, 20 000 rays/frame | real CSV, 20 000 rays/frame |
+| Timing / skew | each point from the render nearest its time (50 Hz → ±10 ms). Spinning at 1 rad/s: **~10 mm** median residual mid-frame (5–7 mm at 100 Hz, 130–150 mm at 10 Hz) | ray cast from the pose interpolated to its exact time: **0.00 mm** residual |
+| Geometry hit | **visual** (whatever ogre2 renders: meshes, heightmaps, everything) | **collision** by default, or visual (`geometry_source`). Box/sphere/cylinder/capsule/ellipsoid/plane/mesh; heightmaps, polylines and cones are skipped |
+| Range accuracy (static) | walls median 1.4 mm, p99 21 mm. Grazing ground (−5..−7°) median **51 mm**, p95 190 mm (depth cube-map quantization; `dense_h:=2880` halves it but RTF drops to 0.96). Edges: 2.3 % of object points > 20 cm off, 0.55 % missed and 0.33 % spurious returns | exact: 0.00 mm everywhere, 0 missed / 0 spurious (vs an independent analytic reference) |
+| Noise | σ = 2 cm along the ray (same model) | same |
+| Rays/s | 200 k used, out of 11.5 M rendered | 200 k cast. **0.33 µs/ray** single-threaded; 2 M rays/s still faster than real time |
+| RTF (full launch) | 1.00 at 50 Hz, 0.92 at 100 Hz | 1.00 |
+| CPU (gz server, 100 % = 1 core) | 212–219 % | 119 % |
+| GPU | 17–28 % util, about +170 MiB; needs ogre2 + EGL/GPU even headless | none |
+| Code (non-blank, non-comment lines, sensor only) | ~225 (system + dense sampler) | ~710 (system + ray caster) |
+| Moving into ignc-kit | copy the package; the world needs `Sensors` (ogre2) + `Imu`; GPU required | copy the package; the world needs only `Imu`; no GPU, so it also runs on CI / in containers without EGL |
+
+**Recommendation: approach 2 (exact ray casting).** It is exact in geometry and in per-point
+timing, so FAST-LIO sees ideal Mid-360 data with true motion skew. It needs no GPU, uses
+about half the CPU of approach 1, and has headroom for several sensors or a 1 kHz world on
+one core. It has no side effects on physics, and integration is the same `<include>` plus
+joint. Its limits are what it hits:
+
+* **Collision geometry**, not visuals. If ignc-kit's collisions are crude boxes, the cloud
+  will be too. Switch to `geometry_source:=visual` where visual meshes matter.
+* **No heightmaps.** If an ignc-kit world uses heightmap terrain, the terrain is invisible to
+  approach 2. Either add a mesh collision for it or use approach 1 for that world.
+
+Keep approach 1 for worlds that rely on rendered-only geometry. Run it at 50 Hz, or at 100 Hz
+when sub-centimetre skew matters more than real time.
