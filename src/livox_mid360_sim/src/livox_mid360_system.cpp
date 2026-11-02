@@ -6,6 +6,7 @@
 // gz.msgs.PointCloudPacked in livox_ros_driver2's 26-byte layout (x,y,z,intensity,tag,line,
 // timestamp[ns]); livox_driver_emulator turns that into CustomMsg.
 #include <algorithm>
+#include <iostream>
 #include <cmath>
 #include <memory>
 #include <mutex>
@@ -34,6 +35,7 @@ public:
     const gz::sim::Entity &, const std::shared_ptr<const sdf::Element> & sdf,
     gz::sim::EntityComponentManager &, gz::sim::EventManager &) override
   {
+    std::cerr << "[livox_mid360] sensor: main - single GPU render per frame (no motion skew)" << std::endl;
     auto get_s = [&](const char * k, const std::string & d) {
         return sdf->HasElement(k) ? sdf->Get<std::string>(k) : d;
       };

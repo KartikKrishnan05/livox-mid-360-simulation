@@ -7,12 +7,15 @@ import os
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import (DeclareLaunchArgument, IncludeLaunchDescription,
+from launch.actions import (DeclareLaunchArgument, IncludeLaunchDescription, LogInfo,
                             OpaqueFunction)
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
+
+# Which sensor implementation this branch builds (printed at launch).
+SENSOR_VARIANT = 'main - single GPU render per frame (no motion skew)'
 
 # The bare sensor (spawn_robot:=false): model.sdf on a 0.5 m pole fixed to the world.
 # This is the exact path ignc-kit uses: <include><uri>model://livox_mid360</uri> plus a
@@ -104,6 +107,7 @@ def _setup(context):
 
 def generate_launch_description():
     return LaunchDescription([
+        LogInfo(msg=f'Livox Mid-360 sensor: {SENSOR_VARIANT}'),
         DeclareLaunchArgument('gui', default_value='true', description='Gazebo GUI'),
         DeclareLaunchArgument('rviz', default_value='true', description='Start RViz'),
         DeclareLaunchArgument('spawn_robot', default_value='true',
