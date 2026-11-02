@@ -162,16 +162,31 @@ The return model then applies the reflectivity-dependent detection range, the ra
 
 **LaserScan layout (verified):** `ranges[v * count + h]`, with `h = 0` at `angle_min`
 (counter-clockwise) and `v = 0` at `vertical_angle_min`. The proof uses the ground plane:
-with this indexing, points below −5.5° land at z = −0.546 m for a sensor at 0.547 m on the
-pole (bare model), and at −0.716 m for the test rig (nominally 0.722 m; the rig sits about
-6 mm lower on its wheels). A flipped `v` would put those points high above the sensor
-(the `ground` check in `check_livox_cloud.py`).
+with this indexing, points below −5.5° land at median z = −0.546 m for a sensor at 0.547 m
+(bare model on its pole) and at −0.716 m for the test rig, whose sensor gz reports at exactly
+0.722 m. A flipped `v` would put those points high above the sensor (the `ground` check in
+`check_livox_cloud.py`). The residual few mm come from depth-render quantization at grazing
+incidence (see Accuracy).
 
 On `main`, each frame comes from **one** render at the end of the frame, so all 20 000 points
 see the scene as it was at one instant. Timestamps are still spread over 100 ms, but motion
 skew is not modelled. The `approach-1-gpu-pattern` branch renders at 50–100 Hz and gives each
 point the render nearest its own timestamp. The `approach-2-exact-raycast` branch casts one
 exact ray per pattern direction. See the comparison at the end.
+
+## Accuracy against analytic geometry
+
+`eval_accuracy.py` ray-casts the world's collision shapes exactly from the true sensor pose,
+which it queries from gz. It finds the pattern block of each frame from the timestamps and
+compares all 20 000 rays per frame with ground truth:
+
+```bash
+ros2 launch livox_mid360_sim sim.launch.py gui:=false rviz:=false range_noise:=0.0
+ros2 run livox_mid360_sim eval_accuracy.py --frames 20
+```
+
+It reports the range error per surface (ground, walls, objects), missed returns (truth hits
+within 40 m but no point) and spurious returns (a point where truth hits nothing).
 
 ## Integration into ignc-kit
 

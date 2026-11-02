@@ -72,7 +72,8 @@ def _setup(context):
         import xacro
         robot_description = xacro.process_file(
             os.path.join(pkg, 'urdf', 'test_rig.urdf.xacro'),
-            mappings={'dense_rate': dense_rate}).toxml()
+            mappings={'dense_rate': dense_rate,
+                      'range_noise': context.launch_configurations['range_noise']}).toxml()
         actions += [
             Node(package='robot_state_publisher', executable='robot_state_publisher',
                  parameters=[{'robot_description': robot_description, 'use_sim_time': True}],
@@ -112,5 +113,7 @@ def generate_launch_description():
                               description='World file (absolute or in share/worlds)'),
         DeclareLaunchArgument('dense_rate', default_value='10',
                               description='Render rate [Hz] of the dense gpu_lidar'),
+        DeclareLaunchArgument('range_noise', default_value='0.02',
+                              description='Range noise stddev [m] (test rig only)'),
         OpaqueFunction(function=_setup),
     ])

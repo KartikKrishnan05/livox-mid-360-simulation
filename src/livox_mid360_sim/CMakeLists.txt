@@ -45,6 +45,7 @@ install(TARGETS livox_driver_emulator DESTINATION lib/${PROJECT_NAME})
 install(PROGRAMS
   scripts/check_livox_cloud.py
   scripts/smoke_test.sh
+  scripts/eval_accuracy.py
   DESTINATION lib/${PROJECT_NAME}
 )
 install(DIRECTORY config launch models urdf worlds DESTINATION share/${PROJECT_NAME})
