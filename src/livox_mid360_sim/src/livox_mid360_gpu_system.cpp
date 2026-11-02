@@ -20,7 +20,8 @@
 #include <gz/common/Console.hh>
 #include <gz/msgs/laserscan.pb.h>
 #include <gz/msgs/pointcloud_packed.pb.h>
-#include <gz/plugin/Register.hh>
+// Second plugin in this library: RegisterMore (Register.hh is in the raycast system).
+#include <gz/plugin/RegisterMore.hh>
 #include <gz/sim/System.hh>
 #include <gz/transport/Node.hh>
 #include <sdf/Element.hh>
@@ -32,14 +33,14 @@
 namespace livox_mid360_sim
 {
 
-class LivoxMid360 : public gz::sim::System, public gz::sim::ISystemConfigure
+class LivoxMid360Gpu : public gz::sim::System, public gz::sim::ISystemConfigure
 {
 public:
   void Configure(
     const gz::sim::Entity &, const std::shared_ptr<const sdf::Element> & sdf,
     gz::sim::EntityComponentManager &, gz::sim::EventManager &) override
   {
-    std::cerr << "[livox_mid360] sensor: approach 1 - dense GPU render at 50 Hz, nearest-render sampling" << std::endl;
+    std::cerr << "[livox_mid360] sensor: gpu (approach 1) - dense GPU render, nearest-render sampling" << std::endl;
     auto get_s = [&](const char * k, const std::string & d) {
         return sdf->HasElement(k) ? sdf->Get<std::string>(k) : d;
       };
@@ -79,7 +80,7 @@ public:
     }
 
     pub_ = node_.Advertise<gz::msgs::PointCloudPacked>(points_topic_);
-    node_.Subscribe(dense_topic_, &LivoxMid360::OnDenseScan, this);
+    node_.Subscribe(dense_topic_, &LivoxMid360Gpu::OnDenseScan, this);
     gzmsg << "[livox_mid360] " << dense_topic_ << " -> " << points_topic_ << ", "
           << points_per_frame_ << " pts/frame @ " << frame_rate_ << " Hz, frame '"
           << frame_id_ << "'\n";
@@ -168,6 +169,6 @@ private:
 }  // namespace livox_mid360_sim
 
 GZ_ADD_PLUGIN(
-  livox_mid360_sim::LivoxMid360, gz::sim::System,
-  livox_mid360_sim::LivoxMid360::ISystemConfigure)
-GZ_ADD_PLUGIN_ALIAS(livox_mid360_sim::LivoxMid360, "livox_mid360_sim::LivoxMid360")
+  livox_mid360_sim::LivoxMid360Gpu, gz::sim::System,
+  livox_mid360_sim::LivoxMid360Gpu::ISystemConfigure)
+GZ_ADD_PLUGIN_ALIAS(livox_mid360_sim::LivoxMid360Gpu, "livox_mid360_sim::LivoxMid360Gpu")

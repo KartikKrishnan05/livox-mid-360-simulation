@@ -21,9 +21,11 @@ find_package(gz-sim REQUIRED)
 find_package(gz_plugin_vendor REQUIRED)
 find_package(gz-plugin REQUIRED COMPONENTS register)
 
-# --- gz-sim system plugin ------------------------------------------------------------
+# --- gz-sim system plugins: LivoxMid360Gpu (approach 1), LivoxMid360Raycast (approach 2) ------------------------------------------------------------
 add_library(livox_mid360_sim_system SHARED
-  src/livox_mid360_system.cpp
+  src/livox_mid360_gpu_system.cpp
+  src/livox_mid360_raycast_system.cpp
+  src/raycaster.cpp
   src/scan_pattern.cpp
 )
 target_include_directories(livox_mid360_sim_system PRIVATE src)
