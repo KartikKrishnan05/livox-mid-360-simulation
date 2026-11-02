@@ -9,6 +9,8 @@
   <xacro:arg name="pattern_file" default="model://livox_mid360/scan_mode/mid360.csv"/>
   <xacro:arg name="dense_rate" default="10"/>
   <xacro:arg name="range_noise" default="0.02"/>
+  <xacro:arg name="dense_h" default="1440"/>
+  <xacro:arg name="dense_v" default="160"/>
 
   <xacro:include filename="$(find livox_mid360_sim)/urdf/livox_mid360.urdf.xacro"/>
 
@@ -113,7 +115,8 @@
 
   <xacro:livox_mid360 parent="mast" xyz="0 0 ${mast_len}" rpy="0 0 0"
                       pattern_file="$(arg pattern_file)" dense_rate="$(arg dense_rate)"
-                      range_noise="$(arg range_noise)"/>
+                      range_noise="$(arg range_noise)"
+                      dense_h_samples="$(arg dense_h)" dense_v_samples="$(arg dense_v)"/>
 
   <gazebo>
     <plugin filename="gz-sim-diff-drive-system" name="gz::sim::systems::DiffDrive">
@@ -131,6 +134,14 @@
       <min_linear_acceleration>-2.0</min_linear_acceleration>
       <max_angular_acceleration>4.0</max_angular_acceleration>
       <min_angular_acceleration>-4.0</min_angular_acceleration>
+    </plugin>
+    <!-- ground truth: world pose of base_link (bridged to /ground_truth/pose) -->
+    <plugin filename="gz-sim-pose-publisher-system" name="gz::sim::systems::PosePublisher">
+      <publish_link_pose>false</publish_link_pose>
+      <publish_model_pose>true</publish_model_pose>
+      <publish_nested_model_pose>false</publish_nested_model_pose>
+      <use_pose_vector_msg>false</use_pose_vector_msg>
+      <update_frequency>200</update_frequency>
     </plugin>
     <plugin filename="gz-sim-joint-state-publisher-system"
             name="gz::sim::systems::JointStatePublisher">

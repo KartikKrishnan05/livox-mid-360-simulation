@@ -13,6 +13,13 @@ compared with ground truth:
 Run against a *static* sensor, ideally with range_noise:=0.0, e.g.
   ros2 launch livox_mid360_sim sim.launch.py gui:=false rviz:=false range_noise:=0.0
   ros2 run livox_mid360_sim eval_accuracy.py --frames 20
+
+Motion skew (--moving): with the test rig moving (e.g. spinning in place), the truth for
+each ray is computed from the sensor pose *at that ray's timestamp* (ground-truth pose from
+gz, /ground_truth/pose, interpolated) and, for contrast, from one pose for the whole frame
+(at timebase). Wheel odometry is not used: it drifts (slip) when spinning in place.
+A sensor that models skew matches the per-ray truth; one that doesn't matches the
+single-pose truth.
 """
 import argparse
 import math
@@ -59,9 +66,10 @@ class Shape:
         self.R, self.t = pose
 
     def intersect(self, o, d):
-        """o: (3,), d: (N,3) unit. Returns t (N,) with inf for no hit (t > 0)."""
-        ol = self.R.T @ (o - self.t)
-        dl = d @ self.R           # = (R^T d^T)^T
+        """o: (3,) or (N,3), d: (N,3) unit. Returns t (N,) with inf for no hit (t > 0)."""
+        ol = np.broadcast_to(o, d.shape) - self.t
+        ol = ol @ self.R          # rows: R^T (o - t)
+        dl = d @ self.R           # rows: R^T d
         n = len(d)
         inf = np.full(n, np.inf)
         with np.errstate(divide='ignore', invalid='ignore'):
@@ -81,8 +89,8 @@ class Shape:
                 return np.where(hit, t, inf)
             if self.kind == 'sphere':
                 r = self.size
-                b = dl @ ol
-                c = ol @ ol - r * r
+                b = np.sum(dl * ol, axis=1)
+                c = np.sum(ol * ol, axis=1) - r * r
                 disc = b * b - c
                 sq = np.sqrt(np.maximum(disc, 0))
                 t0, t1 = -b - sq, -b + sq
@@ -91,19 +99,19 @@ class Shape:
             if self.kind == 'cylinder':
                 r, L = self.size
                 a = dl[:, 0] ** 2 + dl[:, 1] ** 2
-                b = dl[:, 0] * ol[0] + dl[:, 1] * ol[1]
-                c = ol[0] ** 2 + ol[1] ** 2 - r * r
+                b = dl[:, 0] * ol[:, 0] + dl[:, 1] * ol[:, 1]
+                c = ol[:, 0] ** 2 + ol[:, 1] ** 2 - r * r
                 disc = b * b - a * c
                 sq = np.sqrt(np.maximum(disc, 0))
                 best = inf.copy()
                 for tt in ((-b - sq) / a, (-b + sq) / a):
-                    z = ol[2] + tt * dl[:, 2]
+                    z = ol[:, 2] + tt * dl[:, 2]
                     ok = (disc >= 0) & (tt > 1e-9) & (np.abs(z) <= L / 2)
                     best = np.where(ok & (tt < best), tt, best)
                 for zc in (-L / 2, L / 2):
-                    tt = (zc - ol[2]) / dl[:, 2]
-                    x = ol[0] + tt * dl[:, 0]
-                    y = ol[1] + tt * dl[:, 1]
+                    tt = (zc - ol[:, 2]) / dl[:, 2]
+                    x = ol[:, 0] + tt * dl[:, 0]
+                    y = ol[:, 1] + tt * dl[:, 1]
                     ok = (tt > 1e-9) & (x * x + y * y <= r * r)
                     best = np.where(ok & (tt < best), tt, best)
                 return best
@@ -153,6 +161,8 @@ def group_of(name):
         return 'ground'
     if name.startswith('wall'):
         return 'walls'
+    if name.startswith('overhang/slab'):
+        return 'overhang'
     return 'objects'
 
 
@@ -192,7 +202,10 @@ def main():
     ap.add_argument('--max-range', type=float, default=40.0,
                     help='truth hits beyond this are not counted as missed')
     ap.add_argument('--timeout', type=float, default=60.0)
+    ap.add_argument('--moving', action='store_true',
+                    help='moving rig: per-ray sensor pose from /ground_truth/pose')
     import rclpy
+    from geometry_msgs.msg import PoseStamped
     from rclpy.qos import QoSProfile
     from sensor_msgs.msg import PointCloud2
     args = ap.parse_args(rclpy.utilities.remove_ros_args(sys.argv)[1:])
@@ -221,11 +234,22 @@ def main():
     rclpy.init()
     node = rclpy.create_node('eval_accuracy')
     msgs = []
+    gt = []
     node.create_subscription(PointCloud2, args.topic, lambda m: msgs.append(m),
                              QoSProfile(depth=50))
+    if args.moving:
+        def on_gt(m):
+            p, q = m.pose.position, m.pose.orientation
+            gt.append((m.header.stamp.sec * 1_000_000_000 + m.header.stamp.nanosec,
+                       p.x, p.y, p.z, q.w, q.x, q.y, q.z))
+        node.create_subscription(PoseStamped, '/ground_truth/pose', on_gt,
+                                 QoSProfile(depth=2000))
     t0 = time.monotonic()
     while len(msgs) < args.frames + 1 and time.monotonic() - t0 < args.timeout:
         rclpy.spin_once(node, timeout_sec=0.1)
+    t1 = time.monotonic()
+    while args.moving and time.monotonic() - t1 < 0.5:   # poses past the last frame
+        rclpy.spin_once(node, timeout_sec=0.05)
     node.destroy_node()
     rclpy.shutdown()
     msgs = msgs[1:]  # skip a possibly partial first frame
@@ -233,7 +257,39 @@ def main():
         print('no frames received')
         return 1
 
-    rows = {g: [] for g in ('ground', 'walls', 'objects')}
+    if args.moving:
+        g = np.array(gt)
+        g = g[np.argsort(g[:, 0])]
+        qs = g[:, 4:8].copy()
+        for i in range(1, len(qs)):             # consistent hemisphere for interpolation
+            if np.dot(qs[i], qs[i - 1]) < 0:
+                qs[i] = -qs[i]
+        Pl_R, Pl_t = Pl
+
+        def poses_at(ts):
+            """World pose of livox_frame at times ts (ns) -> (N,3,3), (N,3)."""
+            pos = np.stack([np.interp(ts, g[:, 0], g[:, j]) for j in (1, 2, 3)], axis=1)
+            q = np.stack([np.interp(ts, g[:, 0], qs[:, j]) for j in range(4)], axis=1)
+            q /= np.linalg.norm(q, axis=1, keepdims=True)
+            w, x, y, z = q.T
+            Rb = np.stack([
+                np.stack([1 - 2 * (y * y + z * z), 2 * (x * y - w * z), 2 * (x * z + w * y)], 1),
+                np.stack([2 * (x * y + w * z), 1 - 2 * (x * x + z * z), 2 * (y * z - w * x)], 1),
+                np.stack([2 * (x * z - w * y), 2 * (y * z + w * x), 1 - 2 * (x * x + y * y)], 1),
+            ], axis=1)
+            Rs = Rb @ Pl_R
+            return Rs, pos + Rb @ Pl_t + Rs @ np.array([0, 0, args.offset_z])
+        yaw = np.unwrap(np.arctan2(2 * (qs[:, 0] * qs[:, 3] + qs[:, 1] * qs[:, 2]),
+                                   1 - 2 * (qs[:, 2] ** 2 + qs[:, 3] ** 2)))
+        dt = np.diff(g[:, 0]) * 1e-9
+        print(f'ground truth: {len(g)} poses, yaw rate median {np.median(np.diff(yaw) / dt):.3f}'
+              f' rad/s, speed {np.median(np.hypot(np.diff(g[:, 1]), np.diff(g[:, 2])) / dt):.3f}'
+              ' m/s')
+        quart_ray = [[] for _ in range(4)]
+        quart_frame = [[] for _ in range(4)]
+
+    rows = {g: [] for g in ('ground', 'walls', 'overhang', 'objects')}
+    vertical = np.array([group_of(sh.name) in ('walls', 'objects') for sh in shapes])
     missed = spurious = truth_hits = n_points = 0
     dir_err = []
     for m in msgs:
@@ -250,7 +306,22 @@ def main():
             if e < best_err:
                 best_blk, best_err = blk, e
         D = dirs_all[best_blk * 20000: (best_blk + 1) * 20000]
-        tr, idx = raycast(shapes, t, D @ R.T)          # truth for all 20k rays
+        if args.moving:
+            ts = tb + np.arange(20000) * 5000.0
+            Rs, os_ = poses_at(ts)
+            Dw = np.einsum('nij,nj->ni', Rs, D)
+            tr, idx = raycast(shapes, os_, Dw)          # truth with per-ray pose
+            tr0, _ = raycast(shapes, os_[0], D @ Rs[0].T)   # one pose for the frame
+            # Skew is only visible on surfaces whose range changes with yaw: use walls and
+            # vertical objects (the pattern points steeply up at the start/end of a frame).
+            vert = vertical[np.maximum(idx[k], 0)] & (idx[k] >= 0)
+            for q in range(4):
+                sel = (k >= q * 5000) & (k < (q + 1) * 5000) & vert
+                for store, truth in ((quart_ray, tr), (quart_frame, tr0)):
+                    ok_ = np.isfinite(truth[k[sel]])
+                    store[q].append(np.abs(rng[sel][ok_] - truth[k[sel]][ok_]))
+        else:
+            tr, idx = raycast(shapes, t, D @ R.T)      # truth for all 20k rays
         hit_truth = np.isfinite(tr) & (tr >= 0.1) & (tr <= args.max_range)
         got = np.zeros(20000, bool)
         got[k] = True
@@ -288,6 +359,13 @@ def main():
           f'{100 * np.mean(ae > 0.2):>8.3f}')
     print(f'missed returns: {missed}/{truth_hits} ({100 * missed / max(1, truth_hits):.3f}%), '
           f'spurious returns: {spurious}/{n_points} ({100 * spurious / max(1, n_points):.3f}%)')
+    if args.moving:
+        print('motion skew: median |range error| [mm] on walls/vertical objects, by offset_time')
+        print(f'{"truth model":<28} {"0-25ms":>8} {"25-50":>8} {"50-75":>8} {"75-100":>8}')
+        for name, store in (('per-ray pose (skew model)', quart_ray),
+                            ('one pose @ timebase', quart_frame)):
+            vals = [1e3 * np.median(np.concatenate(store[q])) for q in range(4)]
+            print(f'{name:<28} ' + ' '.join(f'{v:>8.2f}' for v in vals))
     return 0
 
 
