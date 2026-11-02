@@ -113,7 +113,7 @@ def generate_launch_description():
                               description='1 = CustomMsg (default), 0 = PointCloud2'),
         DeclareLaunchArgument('world', default_value='livox_test.sdf',
                               description='World file (absolute or in share/worlds)'),
-        DeclareLaunchArgument('dense_rate', default_value='10',
+        DeclareLaunchArgument('dense_rate', default_value='50',
                               description='Render rate [Hz] of the dense gpu_lidar'),
         DeclareLaunchArgument('dense_h', default_value='1440',
                               description='Dense gpu_lidar horizontal samples (test rig)'),

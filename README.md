@@ -47,7 +47,9 @@ Launch arguments:
 | `spawn_robot` | `true` | `true`: diff-drive test rig (Mid-360 on a 0.45 m mast). `false`: the bare `model://livox_mid360` on a pole, jointed to `livox_mid360::lidar_link`, which is the ignc-kit integration path |
 | `xfer_format` | `1` | `1` = CustomMsg, `0` = PointCloud2 (driver layout) on `/livox/lidar` |
 | `world` | `livox_test.sdf` | world file (absolute path or a name in `share/livox_mid360_sim/worlds`) |
-| `dense_rate` | `10` | render rate of the dense gpu_lidar (approach 1) |
+| `dense_rate` | `50` | render rate of the dense gpu_lidar (test rig) |
+| `dense_h`, `dense_v` | `1440`, `160` | dense gpu_lidar resolution (test rig) |
+| `range_noise` | `0.02` | range noise σ [m] (test rig; `0` for accuracy tests) |
 
 ## Check
 
@@ -145,20 +147,24 @@ The `livox_ros_driver2` message definitions are copied from
 [Livox-SDK/livox_ros_driver2](https://github.com/Livox-SDK/livox_ros_driver2) (MIT, see
 `src/livox_ros_driver2/LICENSE.txt`).
 
-## How the sensor works (this branch: `main`)
+## How the sensor works (branch `approach-1-gpu-pattern`)
 
 The model carries a dense `gpu_lidar`: 1440 × 160 rays over 360° × −7.5..52.5°, i.e. 0.25° ×
-0.377°, rendered by ogre2 on the GPU. The `livox_mid360_sim::LivoxMid360` system subscribes to
-its `gz.msgs.LaserScan`. For every 100 ms frame it samples the next 20 000 pattern directions
-from the render:
+0.377°, rendered by ogre2 on the GPU at **50 Hz** (`dense_rate`). The
+`livox_mid360_sim::LivoxMid360` system buffers those renders (`gz.msgs.LaserScan`) and
+publishes one frame of 20 000 pattern rays every 100 ms:
 
-* **bilinear** in 1/r when the four neighbouring pixels lie on one continuous surface
-  (spread ≤ 10 %), which is exact to first order for planes;
-* **nearest neighbour** at depth edges and hit/miss borders, so no "ghost" points float
-  between foreground and background.
-
-The return model then applies the reflectivity-dependent detection range, the range noise and
-`min_range`.
+* point *i* of the recorded pattern is emitted at `timebase + i · 5 µs`;
+* it is sampled from the render **nearest its own timestamp**. A render is expressed in the
+  sensor frame at its render time, so motion skew inside a frame is real, to within half a
+  render period (±10 ms at 50 Hz);
+* a frame is built as soon as a render at or after its last point exists, i.e. at most
+  one render period after the frame ends;
+* sampling uses **bilinear** interpolation in 1/r when the four neighbouring pixels lie on
+  one continuous surface (spread ≤ 10 %), and **nearest neighbour** at depth edges and
+  hit/miss borders, so no "ghost" points float between foreground and background;
+* the return model then applies the reflectivity-dependent detection range, the range noise
+  and `min_range`.
 
 **LaserScan layout (verified):** `ranges[v * count + h]`, with `h = 0` at `angle_min`
 (counter-clockwise) and `v = 0` at `vertical_angle_min`. The proof uses the ground plane:
@@ -166,13 +172,67 @@ with this indexing, points below −5.5° land at median z = −0.546 m for a se
 (bare model on its pole) and at −0.716 m for the test rig, whose sensor gz reports at exactly
 0.722 m. A flipped `v` would put those points high above the sensor (the `ground` check in
 `check_livox_cloud.py`). The residual few mm come from depth-render quantization at grazing
-incidence (see Accuracy).
+incidence (see below).
 
-On `main`, each frame comes from **one** render at the end of the frame, so all 20 000 points
-see the scene as it was at one instant. Timestamps are still spread over 100 ms, but motion
-skew is not modelled. The `approach-1-gpu-pattern` branch renders at 50–100 Hz and gives each
-point the render nearest its own timestamp. The `approach-2-exact-raycast` branch casts one
-exact ray per pattern direction. See the comparison at the end.
+**The pattern sweeps elevation within each frame.** In every 100 ms block of `mid360.csv`,
+the mean elevation runs from +44° (0–10 ms) down to −2° (40–60 ms) and back to +44°
+(90–100 ms). Motion skew therefore shows mostly in the middle of a frame, where the lasers
+see walls.
+
+### Measured on this machine (AMD Ryzen 5 2600 Six-Core Processor, GTX 1050 Ti 4 GB, headless EGL)
+
+Performance (`benchmark.sh`, test world, rig standing still). CPU% is the gz server process
+(100 % = one core). GPU memory is the whole GPU, including about 300 MiB used by the desktop.
+
+| dense render | rate | RTF | gz CPU | GPU util | GPU mem |
+|---|---|---|---|---|---|
+| 1440 × 160 | 10 Hz | 1.00 | 136 % | 10 % | 471 MiB |
+| 1440 × 160 | **50 Hz (default)** | **1.00** | 212–219 % | 17–28 % | 461–471 MiB |
+| 1440 × 160 | 100 Hz | 0.92 | 218 % | 31 % | 471 MiB |
+| 2880 × 160 | 10 Hz | 1.00 | 153 % | 17 % | 531 MiB |
+| 2880 × 160 | 50 Hz | 0.96 | 225 % | 27 % | 531 MiB |
+| 2880 × 160 | 100 Hz | 0.91 | 208 % | 11 % | 531 MiB |
+
+The sensor publishes 200 k rays/s. The GPU renders 11.5 M (1440 × 160 × 50) rays/s for them.
+The limit is the CPU side of the render pipeline: sensor update, GPU→CPU readback, and the
+large `LaserScan` message. The GPU itself is not saturated.
+
+Motion skew. The rig spins in place at 1 rad/s (ground truth ≈ 1.1 rad/s) with
+`range_noise:=0`. The table gives the median |range error| on walls and vertical objects
+against analytic truth computed with the sensor pose **at each ray's own time**, against
+truth computed with **one pose per frame** (at `timebase`):
+
+| dense rate | truth | 0–25 ms | 25–50 ms | 50–75 ms | 75–100 ms |
+|---|---|---|---|---|---|
+| 10 Hz | per-ray pose | 12 | 147 | 128 | 8 |
+| 50 Hz | per-ray pose | 5 | **11** | **10** | 3 |
+| 100 Hz | per-ray pose | 3 | 5 | 7 | 2 |
+| any | one pose per frame | 2–9 | 7–135 | 191–321 | 153–342 |
+
+So at 50 Hz the cloud follows the true per-point pose to about 1 cm (the ±10 ms render
+granularity). Ignoring skew would be wrong by 13–34 cm. 10 Hz is effectively unskewed.
+
+Geometric accuracy (static, `range_noise:=0`, 10 frames, `eval_accuracy.py`):
+
+| render | surface | bias | median \|e\| | p95 | p99 | > 20 cm |
+|---|---|---|---|---|---|---|
+| 1440 × 160 | walls | −19 mm* | 1.4 mm | 6.4 mm | 23 mm | 0.43 % |
+| 1440 × 160 | ground (grazing, −5..−7°) | −33 mm | 51 mm | 189 mm | 460 mm | 4.3 % |
+| 1440 × 160 | overhang (from below) | −0.2 mm | 1.1 mm | 6.5 mm | 11 mm | 0 % |
+| 1440 × 160 | objects (pillars, boxes, sphere, posts, OBJ mesh) | | 1.4 mm | 14 mm | 3.7 m | 2.3 % |
+| 2880 × 160 | walls | | 0.7 mm | 3.5 mm | 6.6 mm | 0.13 % |
+| 2880 × 160 | ground | | 23 mm | 112 mm | 319 mm | 2.0 % |
+
+\* The bias and the large p99 come from a few edge points that took the wrong surface (a
+pillar edge sampled from the wall behind it, or the reverse). Missed returns: 0.55 %.
+Spurious returns: 0.33 %. Both sit at silhouette edges where the render resolution can't
+resolve the edge.
+
+Where the error comes from: ogre2 renders a depth cube map whose texel size follows the
+**horizontal** sample count. Each value is the depth of the nearest texel's direction, not of
+the exact pattern direction. At grazing incidence (ground at −6°: dr/dθ ≈ 65 m/rad) a few
+hundredths of a degree become centimetres. Doubling `dense_h` halves the error; doubling
+`dense_v` does not help. Use `dense_h:=2880` when accuracy matters more than real time.
 
 ## Accuracy against analytic geometry
 
@@ -185,8 +245,15 @@ ros2 launch livox_mid360_sim sim.launch.py gui:=false rviz:=false range_noise:=0
 ros2 run livox_mid360_sim eval_accuracy.py --frames 20
 ```
 
-It reports the range error per surface (ground, walls, objects), missed returns (truth hits
-within 40 m but no point) and spurious returns (a point where truth hits nothing).
+It reports the range error per surface (ground, walls, overhang, objects), missed returns
+(truth hits within 40 m but no point) and spurious returns (a point where truth hits nothing).
+
+For motion skew, drive the rig (e.g. spin it:
+`ros2 topic pub -r 20 /cmd_vel geometry_msgs/msg/Twist "{angular: {z: 1.0}}"`) and run
+`eval_accuracy.py --moving`. It computes truth from the ground-truth pose
+(`/ground_truth/pose`, gz PosePublisher) at each ray's timestamp and compares it with truth
+from one pose per frame. `benchmark.sh "dense_rate:=10" "dense_rate:=50" …` measures RTF,
+gz CPU% and GPU load per launch configuration.
 
 ## Integration into ignc-kit
 
