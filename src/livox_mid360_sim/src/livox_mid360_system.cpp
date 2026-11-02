@@ -9,6 +9,7 @@
 // Output: gz.msgs.PointCloudPacked in livox_ros_driver2's 26-byte layout, one frame of
 // 20 000 rays every 100 ms; livox_driver_emulator turns that into CustomMsg.
 #include <algorithm>
+#include <iostream>
 #include <chrono>
 #include <cmath>
 #include <filesystem>
@@ -61,6 +62,7 @@ public:
     const Entity & entity, const std::shared_ptr<const sdf::Element> & sdf,
     EntityComponentManager & ecm, gz::sim::EventManager &) override
   {
+    std::cerr << "[livox_mid360] sensor: approach 2 - exact CPU ray per pattern direction" << std::endl;
     auto get_s = [&](const char * k, const std::string & d) {
         return sdf->HasElement(k) ? sdf->Get<std::string>(k) : d;
       };
