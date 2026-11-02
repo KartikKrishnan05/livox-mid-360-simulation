@@ -141,7 +141,7 @@
       <publish_model_pose>true</publish_model_pose>
       <publish_nested_model_pose>false</publish_nested_model_pose>
       <use_pose_vector_msg>false</use_pose_vector_msg>
-      <update_frequency>200</update_frequency>
+      <update_frequency>1000</update_frequency>
     </plugin>
     <plugin filename="gz-sim-joint-state-publisher-system"
             name="gz::sim::systems::JointStatePublisher">
