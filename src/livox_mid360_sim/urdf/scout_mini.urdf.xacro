@@ -1,0 +1,180 @@
+<?xml version="1.0"?>
+<!--
+  AgileX Scout Mini with a Livox Mid-360 on its top deck.
+
+  Adapted from ignc-kit gazebo_sim/models/scout_mini/urdf/scout_mini.xacro (Apache-2.0):
+  same links, joints, masses, wheel geometry and gz plugins; mesh paths point to this
+  package. Added: a mounting plate on the deck, the Mid-360 (xacro macro), a ground-truth
+  pose publisher, and frame names on the odometry publisher.
+
+  Collisions: primitives fitted to the meshes by default (mesh_collision:=false); the
+  original mesh collisions make DART jitter (see the mesh_collision arg below).
+
+  Heights (from the meshes): base_link is 0.18 m above ground (wheel centres at z -0.10,
+  radius 0.08). The deck is at z ~0.057 with an open recess in the middle, so a 10 x 10 cm,
+  8 mm plate spans it; the Mid-360 mounting face sits on the plate at z 0.065 and livox_frame
+  (optical centre) at z 0.112 above base_link, i.e. ~0.292 m above ground.
+  Gazebo topics: /cmd_vel (in), /odom, /tf (odom->base_link), /joint_states.
+-->
+<robot name="scout_mini" xmlns:xacro="http://ros.org/wiki/xacro">
+  <xacro:arg name="sensor" default="raycast"/>
+  <xacro:arg name="geometry_source" default="collision"/>
+  <xacro:arg name="pattern_file" default="model://livox_mid360/scan_mode/mid360.csv"/>
+  <xacro:arg name="dense_rate" default="50"/>
+  <xacro:arg name="dense_h" default="1440"/>
+  <xacro:arg name="dense_v" default="160"/>
+  <xacro:arg name="range_noise" default="0.02"/>
+  <!-- false (default): primitive collisions (box body, cylinder wheels) fitted to the meshes.
+       true: the original mesh collisions; with DART they make the robot jitter at rest
+       (IMU |a| std ~2.4 g) and slow the sim (RTF ~0.9). -->
+  <xacro:arg name="mesh_collision" default="false"/>
+  <xacro:property name="mesh_collision" value="$(arg mesh_collision)"/>
+
+  <xacro:include filename="$(find livox_mid360_sim)/urdf/livox_mid360.urdf.xacro"/>
+
+  <xacro:property name="mesh_dir" value="package://livox_mid360_sim/models/scout_mini/meshes"/>
+  <xacro:property name="deck_z" value="0.057"/>
+  <xacro:property name="plate_t" value="0.008"/>
+
+  <!-- Vehicle geometries -->
+  <link name="base_link">
+    <visual>
+      <origin xyz="0 0 0" rpy="1.57 0 -1.57"/>
+      <geometry><mesh filename="${mesh_dir}/scout_mini_base_link.dae"/></geometry>
+    </visual>
+    <xacro:if value="${mesh_collision}">
+      <collision>
+        <origin xyz="0 0 0" rpy="1.57 0 -1.57"/>
+        <geometry><mesh filename="${mesh_dir}/scout_mini_base_link.dae"/></geometry>
+      </collision>
+    </xacro:if>
+    <xacro:unless value="${mesh_collision}">
+      <!-- bounding box of the body mesh in base_link -->
+      <collision>
+        <origin xyz="0.0177 0 -0.0221" rpy="0 0 0"/>
+        <geometry><box size="0.5606 0.39 0.1826"/></geometry>
+      </collision>
+    </xacro:unless>
+  </link>
+
+  <link name="inertial_link">
+    <inertial>
+      <mass value="132.3898489950015"/>
+      <origin xyz="0 0 0"/>
+      <inertia ixx="0.185196122711036" ixy="4.30144213829512E-08" ixz="5.81037523686401E-08"
+               iyy="0.364893736238929" iyz="-0.000386720198091934" izz="0.223868521722778"/>
+    </inertial>
+  </link>
+  <joint name="inertial_joint" type="fixed">
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <parent link="base_link"/>
+    <child link="inertial_link"/>
+  </joint>
+
+  <xacro:macro name="scout_wheel" params="name xyz roll axis">
+    <link name="${name}_link">
+      <inertial>
+        <mass value="3"/>
+        <origin xyz="0 0 0"/>
+        <inertia ixx="0.7171" ixy="0" ixz="0" iyy="0.7171" iyz="0" izz="0.1361"/>
+      </inertial>
+      <visual>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry><mesh filename="${mesh_dir}/wheel.dae"/></geometry>
+      </visual>
+      <xacro:if value="${mesh_collision}">
+        <collision>
+          <origin xyz="0 0 0" rpy="0 0 0"/>
+          <geometry><mesh filename="${mesh_dir}/wheel.dae"/></geometry>
+        </collision>
+      </xacro:if>
+      <xacro:unless value="${mesh_collision}">
+        <!-- tread of wheel.dae: radius 0.081, local z 0.0025..0.0767 (outward) -->
+        <collision>
+          <origin xyz="0 0 0.0396" rpy="0 0 0"/>
+          <geometry><cylinder radius="0.08" length="0.074"/></geometry>
+        </collision>
+      </xacro:unless>
+    </link>
+    <joint name="${name}" type="continuous">
+      <origin rpy="${roll} 0 0" xyz="${xyz}"/>
+      <parent link="base_link"/>
+      <child link="${name}_link"/>
+      <axis xyz="0 0 ${axis}" rpy="0 0 0"/>
+    </joint>
+  </xacro:macro>
+  <xacro:scout_wheel name="front_right_wheel" xyz="0.2319755 -0.2082515 -0.099998" roll="1.57" axis="-1"/>
+  <xacro:scout_wheel name="front_left_wheel" xyz="0.2319755 0.2082515 -0.100998" roll="-1.57" axis="1"/>
+  <xacro:scout_wheel name="rear_right_wheel" xyz="-0.2319755 -0.2082515 -0.099998" roll="1.57" axis="-1"/>
+  <xacro:scout_wheel name="rear_left_wheel" xyz="-0.2319755 0.2082515 -0.100998" roll="-1.57" axis="1"/>
+
+  <!-- Mounting plate over the deck recess, Mid-360 centred on it -->
+  <link name="livox_mount_plate">
+    <inertial>
+      <mass value="0.1"/>
+      <inertia ixx="1e-4" iyy="1e-4" izz="1e-4" ixy="0" ixz="0" iyz="0"/>
+    </inertial>
+    <visual>
+      <geometry><box size="0.10 0.10 ${plate_t}"/></geometry>
+      <material name="plate_grey"><color rgba="0.55 0.55 0.6 1"/></material>
+    </visual>
+    <collision>
+      <geometry><box size="0.10 0.10 ${plate_t}"/></geometry>
+    </collision>
+  </link>
+  <joint name="livox_mount_plate_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="livox_mount_plate"/>
+    <origin xyz="0 0 ${deck_z + plate_t / 2}"/>
+  </joint>
+
+  <xacro:livox_mid360 parent="livox_mount_plate" xyz="0 0 ${plate_t / 2}" rpy="0 0 0"
+                      sensor="$(arg sensor)" geometry_source="$(arg geometry_source)"
+                      pattern_file="$(arg pattern_file)" dense_rate="$(arg dense_rate)"
+                      range_noise="$(arg range_noise)"
+                      dense_h_samples="$(arg dense_h)" dense_v_samples="$(arg dense_v)"/>
+
+  <!-- Scout gazebo plugins (as in ignc-kit) -->
+  <gazebo>
+    <plugin filename="gz-sim-joint-state-publisher-system"
+            name="gz::sim::systems::JointStatePublisher">
+      <topic>/joint_states</topic>
+      <update_rate>50</update_rate>
+      <joint_name>front_right_wheel</joint_name>
+      <joint_name>front_left_wheel</joint_name>
+      <joint_name>rear_right_wheel</joint_name>
+      <joint_name>rear_left_wheel</joint_name>
+    </plugin>
+    <plugin filename="gz-sim-diff-drive-system" name="gz::sim::systems::DiffDrive">
+      <left_joint>front_left_wheel</left_joint>
+      <right_joint>front_right_wheel</right_joint>
+      <left_joint>rear_left_wheel</left_joint>
+      <right_joint>rear_right_wheel</right_joint>
+      <wheel_separation>0.49</wheel_separation>
+      <wheel_radius>0.08</wheel_radius>
+      <max_wheel_torque>20</max_wheel_torque>
+      <max_linear_acceleration>0.3</max_linear_acceleration>
+      <max_angular_acceleration>0.5</max_angular_acceleration>
+      <min_linear_acceleration>-0.3</min_linear_acceleration>
+      <min_angular_acceleration>-0.5</min_angular_acceleration>
+      <topic>/cmd_vel</topic>
+    </plugin>
+    <plugin filename="gz-sim-odometry-publisher-system"
+            name="gz::sim::systems::OdometryPublisher">
+      <odom_frame>odom</odom_frame>
+      <robot_base_frame>base_link</robot_base_frame>
+      <odom_publish_frequency>50</odom_publish_frequency>
+      <odom_topic>/odom</odom_topic>
+      <tf_topic>/tf</tf_topic>
+      <dimensions>2</dimensions>
+    </plugin>
+    <!-- ground truth: world pose of base_link (bridged to /ground_truth/pose) -->
+    <plugin filename="gz-sim-pose-publisher-system" name="gz::sim::systems::PosePublisher">
+      <publish_link_pose>false</publish_link_pose>
+      <publish_model_pose>true</publish_model_pose>
+      <publish_nested_model_pose>false</publish_nested_model_pose>
+      <use_pose_vector_msg>false</use_pose_vector_msg>
+      <update_frequency>1000</update_frequency>
+    </plugin>
+  </gazebo>
+</robot>

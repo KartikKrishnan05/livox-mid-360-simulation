@@ -47,11 +47,54 @@ Launch arguments:
 | `spawn_robot` | `true` | `true`: diff-drive test rig (Mid-360 on a 0.45 m mast). `false`: the bare `model://livox_mid360` on a pole, jointed to `livox_mid360::lidar_link`, which is the ignc-kit integration path |
 | `xfer_format` | `1` | `1` = CustomMsg, `0` = PointCloud2 (driver layout) on `/livox/lidar` |
 | `world` | `livox_test.sdf` | world file (absolute path or a name in `share/livox_mid360_sim/worlds`) |
+| `robot` | `test_rig` | `test_rig` (diff-drive rig, Mid-360 on a 0.45 m mast) or `scout_mini` (AgileX Scout Mini, Mid-360 on the deck) |
+| `mesh_collision` | `false` | `scout_mini`: original mesh collisions instead of fitted primitives (see below) |
 | `sensor` | `raycast` | `raycast` (exact CPU rays, approach 2) or `gpu` (dense GPU render, approach 1) |
 | `geometry_source` | `collision` | `raycast`: geometry the rays hit, `collision` or `visual` (test rig) |
 | `dense_rate` | `50` | `gpu`: render rate of the dense gpu_lidar (test rig) |
 | `dense_h`, `dense_v` | `1440`, `160` | `gpu`: dense gpu_lidar resolution (test rig) |
 | `range_noise` | `0.02` | range noise σ [m] (test rig; `0` for accuracy tests) |
+
+## Robots
+
+```bash
+ros2 launch livox_mid360_sim sim.launch.py robot:=scout_mini                # Scout Mini
+ros2 launch livox_mid360_sim sim.launch.py robot:=scout_mini sensor:=gpu
+```
+
+**`scout_mini`** (`urdf/scout_mini.urdf.xacro`) is the AgileX Scout Mini from ignc-kit's
+`gazebo_sim` package. It has the same links, joints, masses, DiffDrive (4 wheels, separation
+0.49 m, radius 0.08 m), joint-state and odometry plugins (`/cmd_vel`, `/odom`, `/tf`
+odom→base_link, `/joint_states`), and the same meshes (`models/scout_mini`, Apache-2.0). The
+Mid-360 is centred on a 10 × 10 cm, 8 mm mounting plate on the top deck. The deck has an open
+recess in the middle, which the plate spans.
+
+| frame | height above `base_link` | above ground |
+|---|---|---|
+| `base_link` | 0 | 0.180 m (wheel centres −0.10, radius 0.08) |
+| deck / plate top (= Mid-360 mounting face) | 0.057 / 0.065 m | |
+| `livox_frame` (optical centre) | 0.112 m | **0.292 m** |
+
+At −7° the lowest rays clear the deck edges, so the robot doesn't occlude itself. Changes
+from the ignc-kit original:
+
+* **Collisions are primitives fitted to the meshes:** a box for the body, cylinders of
+  r = 0.08 m and width 0.074 m for the wheel treads. The visuals stay meshes. With the
+  original mesh collisions (`mesh_collision:=true`), RTF drops to about 0.9 because of the
+  106k-vertex body mesh.
+* **The spawn height is 0.180 m**, i.e. resting height. ignc-kit spawns at 0.25 m. A drop
+  of even 2 cm onto the 132 kg body shakes the IMU at several g for about 0.5 s, which
+  would spoil FAST-LIO's IMU initialisation. At rest the IMU then shows only its configured
+  noise (|a| std 0.006 g).
+* Odometry frame names are set explicitly (`odom`, `base_link`), and a PosePublisher feeds
+  `/ground_truth/pose`.
+
+Checks on the Scout: `SMOKE_GROUND_Z=-0.292 ros2 run livox_mid360_sim smoke_test.sh
+robot:=scout_mini [sensor:=gpu]` passes with both sensors at RTF 1.0. The ground points land
+at −0.292 m. For accuracy and skew, use `eval_accuracy.py --model scout_mini`.
+
+The meshes are resolved as `package://livox_mid360_sim/models/scout_mini/meshes/…`. Gazebo
+finds them because the package's env hook also adds `share/` to `GZ_SIM_RESOURCE_PATH`.
 
 ## Check
 

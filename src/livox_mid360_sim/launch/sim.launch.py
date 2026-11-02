@@ -1,7 +1,7 @@
 """Livox Mid-360 simulation: Gazebo + bridge + livox_driver_emulator (+ robot, RViz).
 
-ros2 launch livox_mid360_sim sim.launch.py [sensor:=raycast|gpu] [gui:=true] [rviz:=true]
-    [spawn_robot:=true] [xfer_format:=1] [world:=<path or name in share/livox_mid360_sim/worlds>]
+ros2 launch livox_mid360_sim sim.launch.py [sensor:=raycast|gpu] [robot:=test_rig|scout_mini]
+    [gui:=true] [rviz:=true] [spawn_robot:=true] [xfer_format:=1] [world:=<path or name in share/livox_mid360_sim/worlds>]
 
 sensor:=raycast  exact CPU ray per pattern direction (approach 2, default, recommended)
 sensor:=gpu      dense gpu_lidar rendered at dense_rate Hz, sampled along the pattern (approach 1)
@@ -23,6 +23,12 @@ SENSORS = {
                 'model://livox_mid360'),
     'gpu': ('gpu (approach 1) - dense GPU render, nearest-render sampling',
             'model://livox_mid360_gpu'),
+}
+
+# Robots (launch argument "robot"): xacro file, spawn height of base_link [m].
+ROBOTS = {
+    'test_rig': ('test_rig.urdf.xacro', '0.1'),      # diff-drive rig, Mid-360 on a 0.45 m mast
+    'scout_mini': ('scout_mini.urdf.xacro', '0.180'),  # AgileX Scout Mini (rests at 0.1805)
 }
 
 # The bare sensor (spawn_robot:=false): model.sdf on a 0.5 m pole fixed to the world.
@@ -63,6 +69,10 @@ def _setup(context):
     if sensor not in SENSORS:
         raise RuntimeError(f"sensor:={sensor} is not one of {', '.join(SENSORS)}")
     description, stand_model = SENSORS[sensor]
+    robot = context.launch_configurations['robot'].strip()
+    if robot not in ROBOTS:
+        raise RuntimeError(f"robot:={robot} is not one of {', '.join(ROBOTS)}")
+    robot_xacro, spawn_z = ROBOTS[robot]
 
     gz_args = f'-r {world}' if gui else f'-r -s --headless-rendering {world}'
     extra = ''
@@ -90,10 +100,12 @@ def _setup(context):
     if spawn_robot:
         import xacro
         robot_description = xacro.process_file(
-            os.path.join(pkg, 'urdf', 'test_rig.urdf.xacro'),
+            os.path.join(pkg, 'urdf', robot_xacro),
             mappings={'sensor': sensor,
                       'geometry_source': context.launch_configurations['geometry_source'],
                       'dense_rate': dense_rate,
+                      **({'mesh_collision': context.launch_configurations['mesh_collision']}
+                         if robot == 'scout_mini' else {}),
                       'range_noise': context.launch_configurations['range_noise'],
                       'dense_h': context.launch_configurations['dense_h'],
                       'dense_v': context.launch_configurations['dense_v']}).toxml()
@@ -102,8 +114,8 @@ def _setup(context):
                  parameters=[{'robot_description': robot_description, 'use_sim_time': True}],
                  output='screen'),
             Node(package='ros_gz_sim', executable='create',
-                 arguments=['-topic', 'robot_description', '-name', 'test_rig',
-                            '-z', '0.1'],
+                 arguments=['-topic', 'robot_description', '-name', robot,
+                            '-z', spawn_z],
                  output='screen'),
         ]
     else:
@@ -129,6 +141,12 @@ def generate_launch_description():
         DeclareLaunchArgument('sensor', default_value='raycast',
                               description='raycast (exact CPU rays, approach 2) | '
                                           'gpu (dense GPU render, approach 1)'),
+        DeclareLaunchArgument('robot', default_value='test_rig',
+                              description='test_rig (Mid-360 on a 0.45 m mast) | '
+                                          'scout_mini (AgileX Scout Mini, Mid-360 on the deck)'),
+        DeclareLaunchArgument('mesh_collision', default_value='false',
+                              description='scout_mini: original mesh collisions instead of '
+                                          'fitted primitives'),
         DeclareLaunchArgument('gui', default_value='true', description='Gazebo GUI'),
         DeclareLaunchArgument('rviz', default_value='true', description='Start RViz'),
         DeclareLaunchArgument('spawn_robot', default_value='true',
