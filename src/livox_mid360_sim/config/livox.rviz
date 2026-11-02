@@ -1,0 +1,94 @@
+Panels:
+  - Class: rviz_common/Displays
+    Name: Displays
+Visualization Manager:
+  Class: ""
+  Displays:
+    - Class: rviz_default_plugins/Grid
+      Name: Grid
+      Enabled: true
+      Reference Frame: <Fixed Frame>
+      Cell Size: 1
+      Plane Cell Count: 20
+      Color: 160; 160; 164
+    - Class: rviz_default_plugins/RobotModel
+      Name: RobotModel
+      Enabled: true
+      Description Source: Topic
+      Description Topic:
+        Value: /robot_description
+        Depth: 5
+        Durability Policy: Transient Local
+        Reliability Policy: Reliable
+    - Class: rviz_default_plugins/TF
+      Name: TF
+      Enabled: false
+    - Class: rviz_default_plugins/PointCloud2
+      Name: Livox frame (/livox/points)
+      Enabled: true
+      Topic:
+        Value: /livox/points
+        Depth: 5
+        Reliability Policy: Best Effort
+        Durability Policy: Volatile
+        History Policy: Keep Last
+      Style: Points
+      Size (Pixels): 2
+      Decay Time: 0
+      Color Transformer: AxisColor
+      Axis: Z
+      Use rainbow: true
+      Autocompute Value Bounds: false
+      Min Value: -0.2
+      Max Value: 2.6
+      Position Transformer: XYZ
+    - Class: rviz_default_plugins/PointCloud2
+      Name: Livox by time (/livox/points)
+      Enabled: false
+      Topic:
+        Value: /livox/points
+        Depth: 5
+        Reliability Policy: Best Effort
+      Style: Points
+      Size (Pixels): 2
+      Decay Time: 0
+      Color Transformer: Intensity
+      Channel Name: timestamp
+      Use rainbow: true
+      Autocompute Intensity Bounds: true
+      Position Transformer: XYZ
+    - Class: rviz_default_plugins/PointCloud2
+      Name: Accumulated 1 s
+      Enabled: false
+      Topic:
+        Value: /livox/points
+        Depth: 5
+        Reliability Policy: Best Effort
+      Style: Points
+      Size (Pixels): 1
+      Decay Time: 1
+      Color Transformer: AxisColor
+      Axis: Z
+      Use rainbow: true
+      Position Transformer: XYZ
+  Global Options:
+    Background Color: 48; 48; 48
+    Fixed Frame: odom
+    Frame Rate: 30
+  Name: root
+  Tools:
+    - Class: rviz_default_plugins/MoveCamera
+    - Class: rviz_default_plugins/Select
+  Value: true
+  Views:
+    Current:
+      Class: rviz_default_plugins/Orbit
+      Distance: 18
+      Focal Point: {X: 0, Y: 0, Z: 0}
+      Pitch: 0.75
+      Yaw: 3.6
+      Target Frame: base_link
+    Saved: ~
+Window Geometry:
+  Width: 1400
+  Height: 900
