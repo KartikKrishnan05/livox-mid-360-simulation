@@ -33,37 +33,6 @@
         </material>
       </visual>
 
-      <!-- Dense depth render, sampled along the Mid-360 pattern by the system below.
-           1440 x 160 = 0.25 deg x 0.377 deg over 360 x -7.5..52.5 deg. -->
-      <sensor name="livox_dense" type="gpu_lidar">
-        <pose>0 0 0.047 0 0 0</pose>
-        <topic>/livox/dense_scan</topic>
-        <update_rate>10</update_rate>
-        <always_on>true</always_on>
-        <visualize>false</visualize>
-        <lidar>
-          <scan>
-            <horizontal>
-              <samples>1440</samples>
-              <resolution>1</resolution>
-              <min_angle>-3.14159265359</min_angle>
-              <max_angle>3.13722933188</max_angle>
-            </horizontal>
-            <vertical>
-              <samples>160</samples>
-              <resolution>1</resolution>
-              <min_angle>-0.130899693899</min_angle>
-              <max_angle>0.916297857297</max_angle>
-            </vertical>
-          </scan>
-          <range>
-            <min>0.1</min>
-            <max>70.0</max>
-            <resolution>0.001</resolution>
-          </range>
-        </lidar>
-      </sensor>
-
       <!-- Built-in IMU (ICM40609-class noise). 0.047 - 0.04412 = 0.00288 -->
       <sensor name="livox_imu" type="imu">
         <pose>0.011 0.02329 0.00288 0 0 0</pose>
@@ -86,8 +55,12 @@
     </link>
 
     <plugin filename="livox_mid360_sim_system" name="livox_mid360_sim::LivoxMid360">
+      <link_name>lidar_link</link_name>
+      <!-- livox_frame (optical centre) relative to lidar_link -->
+      <frame_offset>0 0 0.047 0 0 0</frame_offset>
       <frame_id>livox_frame</frame_id>
-      <dense_topic>/livox/dense_scan</dense_topic>
+      <!-- collision (default) or visual -->
+      <geometry_source>collision</geometry_source>
       <points_topic>/livox/points</points_topic>
       <pattern_file>model://livox_mid360/scan_mode/mid360.csv</pattern_file>
       <point_rate>200000</point_rate>

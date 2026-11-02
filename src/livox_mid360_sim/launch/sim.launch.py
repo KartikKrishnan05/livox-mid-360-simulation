@@ -47,7 +47,6 @@ def _setup(context):
     world = context.launch_configurations['world']
     if not os.path.isabs(world) and not os.path.exists(world):
         world = os.path.join(pkg, 'worlds', world)
-    dense_rate = context.launch_configurations['dense_rate']
 
     gz_args = f'-r {world}' if gui else f'-r -s --headless-rendering {world}'
     actions = [
@@ -72,10 +71,9 @@ def _setup(context):
         import xacro
         robot_description = xacro.process_file(
             os.path.join(pkg, 'urdf', 'test_rig.urdf.xacro'),
-            mappings={'dense_rate': dense_rate,
-                      'range_noise': context.launch_configurations['range_noise'],
-                      'dense_h': context.launch_configurations['dense_h'],
-                      'dense_v': context.launch_configurations['dense_v']}).toxml()
+            mappings={'range_noise': context.launch_configurations['range_noise'],
+                      'geometry_source':
+                          context.launch_configurations['geometry_source']}).toxml()
         actions += [
             Node(package='robot_state_publisher', executable='robot_state_publisher',
                  parameters=[{'robot_description': robot_description, 'use_sim_time': True}],
@@ -113,12 +111,9 @@ def generate_launch_description():
                               description='1 = CustomMsg (default), 0 = PointCloud2'),
         DeclareLaunchArgument('world', default_value='livox_test.sdf',
                               description='World file (absolute or in share/worlds)'),
-        DeclareLaunchArgument('dense_rate', default_value='10',
-                              description='Render rate [Hz] of the dense gpu_lidar'),
-        DeclareLaunchArgument('dense_h', default_value='1440',
-                              description='Dense gpu_lidar horizontal samples (test rig)'),
-        DeclareLaunchArgument('dense_v', default_value='160',
-                              description='Dense gpu_lidar vertical samples (test rig)'),
+        DeclareLaunchArgument('geometry_source', default_value='collision',
+                              description='collision | visual geometry hit by the rays '
+                                          '(test rig)'),
         DeclareLaunchArgument('range_noise', default_value='0.02',
                               description='Range noise stddev [m] (test rig only)'),
         OpaqueFunction(function=_setup),

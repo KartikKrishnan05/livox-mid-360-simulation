@@ -24,6 +24,7 @@ find_package(gz-plugin REQUIRED COMPONENTS register)
 # --- gz-sim system plugin ------------------------------------------------------------
 add_library(livox_mid360_sim_system SHARED
   src/livox_mid360_system.cpp
+  src/raycaster.cpp
   src/scan_pattern.cpp
 )
 target_include_directories(livox_mid360_sim_system PRIVATE src)

@@ -14,9 +14,8 @@
   <xacro:macro name="livox_mid360"
     params="parent xyz:='0 0 0' rpy:='0 0 0'
             frame_id:=livox_frame
-            points_topic:=/livox/points imu_topic:=/livox/imu_raw dense_topic:=/livox/dense_scan
-            point_rate:=200000 frame_rate:=10 imu_rate:=200 dense_rate:=10
-            dense_h_samples:=1440 dense_v_samples:=160
+            points_topic:=/livox/points imu_topic:=/livox/imu_raw
+            point_rate:=200000 frame_rate:=10 imu_rate:=200 geometry_source:=collision
             pattern_file:=model://livox_mid360/scan_mode/mid360.csv
             range_noise:=0.02 min_range:=0.1 max_range:=70.0 nominal_range:=40.0">
 
@@ -59,35 +58,6 @@
     </gazebo>
 
     <gazebo reference="${frame_id}">
-      <sensor name="${frame_id}_dense" type="gpu_lidar">
-        <pose>0 0 0 0 0 0</pose>
-        <topic>${dense_topic}</topic>
-        <update_rate>${dense_rate}</update_rate>
-        <always_on>true</always_on>
-        <visualize>false</visualize>
-        <lidar>
-          <scan>
-            <horizontal>
-              <samples>${dense_h_samples}</samples>
-              <resolution>1</resolution>
-              <min_angle>${-pi}</min_angle>
-              <max_angle>${pi - 2*pi/dense_h_samples}</max_angle>
-            </horizontal>
-            <vertical>
-              <samples>${dense_v_samples}</samples>
-              <resolution>1</resolution>
-              <min_angle>${radians(-7.5)}</min_angle>
-              <max_angle>${radians(52.5)}</max_angle>
-            </vertical>
-          </scan>
-          <range>
-            <min>${min_range}</min>
-            <max>${max_range}</max>
-            <resolution>0.001</resolution>
-          </range>
-        </lidar>
-      </sensor>
-
       <sensor name="${frame_id}_imu" type="imu">
         <pose>0.011 0.02329 -0.04412 0 0 0</pose>
         <topic>${imu_topic}</topic>
@@ -112,7 +82,7 @@
       <plugin filename="livox_mid360_sim_system" name="livox_mid360_sim::LivoxMid360">
         <frame_id>${frame_id}</frame_id>
         <link_name>${frame_id}</link_name>
-        <dense_topic>${dense_topic}</dense_topic>
+        <geometry_source>${geometry_source}</geometry_source>
         <points_topic>${points_topic}</points_topic>
         <pattern_file>${pattern_file}</pattern_file>
         <point_rate>${point_rate}</point_rate>
