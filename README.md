@@ -16,9 +16,9 @@ Two sensor implementations, switchable at launch with `sensor:=`:
 
 ```
 src/
-  livox_ros_driver2/   messages only (CustomMsg, CustomPoint), identical to upstream
-  livox_mid360_sim/    gz-sim system plugin, model, xacro, world, launch, emulator, checks
-docs/                  notes on approaches that were tried and dropped
+  livox_ros_driver2/     messages only (CustomMsg, CustomPoint), identical to upstream
+  livox_mid360_gazebo/   gz-sim system plugin, model, xacro, world, launch, emulator, checks
+docs/                    notes on approaches that were tried and dropped
 ```
 
 **This is the `rovers` branch:** the sensor on two robots (a diff-drive test rig and the
@@ -49,7 +49,7 @@ source install/setup.bash     # also sets GZ_SIM_SYSTEM_PLUGIN_PATH / GZ_SIM_RES
 ## Run
 
 ```bash
-ros2 launch livox_mid360_sim sim.launch.py                 # Gazebo GUI + RViz + test rig
+ros2 launch livox_mid360_gazebo sim.launch.py                 # Gazebo GUI + RViz + test rig
 ros2 run teleop_twist_keyboard teleop_twist_keyboard       # drive it (second terminal)
 ```
 
@@ -61,7 +61,7 @@ Launch arguments:
 | `rviz` | `true` | RViz with `config/livox.rviz` |
 | `spawn_robot` | `true` | `true`: diff-drive test rig (Mid-360 on a 0.45 m mast). `false`: the bare `model://livox_mid360` on a pole, jointed to `livox_mid360::lidar_link`, which is the ignc-kit integration path |
 | `xfer_format` | `1` | `1` = CustomMsg, `0` = PointCloud2 (driver layout) on `/livox/lidar` |
-| `world` | `livox_test.sdf` | world file (absolute path or a name in `share/livox_mid360_sim/worlds`) |
+| `world` | `livox_test.sdf` | world file (absolute path or a name in `share/livox_mid360_gazebo/worlds`) |
 | `robot` | `test_rig` | `test_rig` (diff-drive rig, Mid-360 on a 0.45 m mast) or `scout_mini` (AgileX Scout Mini, Mid-360 on the deck) |
 | `mesh_collision` | `false` | `scout_mini`: original mesh collisions instead of fitted primitives (see below) |
 | `sensor` | `raycast` | `raycast` (exact CPU rays, approach 2) or `gpu` (dense GPU render, approach 1) |
@@ -73,8 +73,8 @@ Launch arguments:
 ## Robots
 
 ```bash
-ros2 launch livox_mid360_sim sim.launch.py robot:=scout_mini                # Scout Mini
-ros2 launch livox_mid360_sim sim.launch.py robot:=scout_mini sensor:=gpu
+ros2 launch livox_mid360_gazebo sim.launch.py robot:=scout_mini                # Scout Mini
+ros2 launch livox_mid360_gazebo sim.launch.py robot:=scout_mini sensor:=gpu
 ```
 
 **`scout_mini`** (`urdf/scout_mini.urdf.xacro`) is the AgileX Scout Mini from ignc-kit's
@@ -104,20 +104,20 @@ from the ignc-kit original:
 * Odometry frame names are set explicitly (`odom`, `base_link`), and a PosePublisher feeds
   `/ground_truth/pose`.
 
-Checks on the Scout: `SMOKE_GROUND_Z=-0.292 ros2 run livox_mid360_sim smoke_test.sh
+Checks on the Scout: `SMOKE_GROUND_Z=-0.292 ros2 run livox_mid360_gazebo smoke_test.sh
 robot:=scout_mini [sensor:=gpu]` passes with both sensors at RTF 1.0. The ground points land
 at −0.292 m. For accuracy and skew, use `eval_accuracy.py --model scout_mini`.
 
-The meshes are resolved as `package://livox_mid360_sim/models/scout_mini/meshes/…`. Gazebo
+The meshes are resolved as `package://livox_mid360_gazebo/models/scout_mini/meshes/…`. Gazebo
 finds them because the package's env hook also adds `share/` to `GZ_SIM_RESOURCE_PATH`.
 
 ## Check
 
 ```bash
-ros2 run livox_mid360_sim smoke_test.sh                    # headless: launch, check, report, tear down
-ros2 run livox_mid360_sim smoke_test.sh xfer_format:=0
-SMOKE_GROUND_Z=-0.547 ros2 run livox_mid360_sim smoke_test.sh spawn_robot:=false
-ros2 run livox_mid360_sim check_livox_cloud.py --ground-z -0.722   # against a running sim
+ros2 run livox_mid360_gazebo smoke_test.sh                    # headless: launch, check, report, tear down
+ros2 run livox_mid360_gazebo smoke_test.sh xfer_format:=0
+SMOKE_GROUND_Z=-0.547 ros2 run livox_mid360_gazebo smoke_test.sh spawn_robot:=false
+ros2 run livox_mid360_gazebo check_livox_cloud.py --ground-z -0.722   # against a running sim
 ```
 
 `check_livox_cloud.py` exits non-zero on failure. It checks:
@@ -213,8 +213,8 @@ Both implementations are built into one plugin library and produce the same outp
 return model and IMU. Pick one at launch:
 
 ```bash
-ros2 launch livox_mid360_sim sim.launch.py                  # sensor:=raycast (default)
-ros2 launch livox_mid360_sim sim.launch.py sensor:=gpu      # dense GPU render
+ros2 launch livox_mid360_gazebo sim.launch.py                  # sensor:=raycast (default)
+ros2 launch livox_mid360_gazebo sim.launch.py sensor:=gpu      # dense GPU render
 ```
 
 The launch file prints `Livox Mid-360 sensor: …`, and the plugin prints
@@ -223,7 +223,7 @@ The launch file prints `Livox Mid-360 sensor: …`, and the plugin prints
 | | `sensor:=raycast` (approach 2) | `sensor:=gpu` (approach 1) |
 |---|---|---|
 | SDF model | `model://livox_mid360` | `model://livox_mid360_gpu` (include it with `<name>livox_mid360</name>`) |
-| system plugin | `livox_mid360_sim::LivoxMid360Raycast` (alias `livox_mid360_sim::LivoxMid360`) | `livox_mid360_sim::LivoxMid360Gpu` |
+| system plugin | `livox_mid360_gazebo::LivoxMid360Raycast` (alias `livox_mid360_gazebo::LivoxMid360`) | `livox_mid360_gazebo::LivoxMid360Gpu` |
 | xacro | `<xacro:livox_mid360 … sensor="raycast"/>` | `<xacro:livox_mid360 … sensor="gpu"/>` |
 | options | `geometry_source:=collision\|visual` | `dense_rate:=50`, `dense_h:=1440`, `dense_v:=160` |
 | world needs | `Imu` system | `Sensors` (ogre2) + `Imu` systems, a GPU |
@@ -234,7 +234,7 @@ One depth image per frame, as in the existing GPU-based Mid-360 simulations, is
 ## Sensor `raycast` (approach 2, default): one exact ray per pattern direction
 
 `model://livox_mid360` (and the xacro with `sensor:=raycast`, the default) has no
-`gpu_lidar`. The `livox_mid360_sim::LivoxMid360Raycast` system casts
+`gpu_lidar`. The `livox_mid360_gazebo::LivoxMid360Raycast` system casts
 **one exact ray per pattern direction** on the CPU:
 
 * **Timing:** every physics step it casts exactly the rays whose timestamps
@@ -299,7 +299,7 @@ meshes. Approach 1 always sees visuals.
 
 `model://livox_mid360_gpu` (or the xacro with `sensor:=gpu`) carries a dense `gpu_lidar`: 1440 × 160 rays over 360° × −7.5..52.5°, i.e. 0.25° ×
 0.377°, rendered by ogre2 on the GPU at **50 Hz** (`dense_rate`). The
-`livox_mid360_sim::LivoxMid360Gpu` system buffers those renders (`gz.msgs.LaserScan`) and
+`livox_mid360_gazebo::LivoxMid360Gpu` system buffers those renders (`gz.msgs.LaserScan`) and
 publishes one frame of 20 000 pattern rays every 100 ms:
 
 * point *i* of the recorded pattern is emitted at `timebase + i · 5 µs`;
@@ -389,8 +389,8 @@ which it queries from gz. It finds the pattern block of each frame from the time
 compares all 20 000 rays per frame with ground truth:
 
 ```bash
-ros2 launch livox_mid360_sim sim.launch.py gui:=false rviz:=false range_noise:=0.0
-ros2 run livox_mid360_sim eval_accuracy.py --frames 20
+ros2 launch livox_mid360_gazebo sim.launch.py gui:=false rviz:=false range_noise:=0.0
+ros2 run livox_mid360_gazebo eval_accuracy.py --frames 20
 ```
 
 It reports the range error per surface (ground, walls, overhang, objects), missed returns
@@ -404,7 +404,7 @@ measures RTF, gz CPU% and GPU load per launch configuration.
 
 ## Integration into ignc-kit
 
-1. Copy **only** `src/livox_mid360_sim` into the ignc-kit workspace. **Do not copy
+1. Copy **only** `src/livox_mid360_gazebo` into the ignc-kit workspace. **Do not copy
    `src/livox_ros_driver2`**: ignc-kit uses the real `livox_ros_driver2`, which has the same
    package name. Two packages with one name break the build, and the definitions are
    identical (same type hashes), so the real one is a drop-in.

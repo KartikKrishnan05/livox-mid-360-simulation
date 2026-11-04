@@ -12,4 +12,4 @@ real driver publishes without building Livox-SDK2.
 **Do not copy this package into a workspace that already contains the real
 `livox_ros_driver2`.** Both packages have the same name; colcon will refuse to build
 (or one will silently shadow the other). In such a workspace, use the real driver for
-the message definitions and copy only `livox_mid360_sim`.
+the message definitions and copy only `livox_mid360_gazebo`.

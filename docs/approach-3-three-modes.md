@@ -27,6 +27,9 @@ single plugin library and no duplicate ray caster or scan-pattern loader to main
 
 ## Where the code is
 
+The package was then called `livox_mid360_sim`; it has since been renamed to
+`livox_mid360_gazebo`.
+
 * Commit `9906e28` (the former branch `approach-3-three-modes`, since deleted; the commit
   stays in `main`'s history as the second parent of `f676431`): the standalone version, with
   its own launch file, checker and pixi setup. `git checkout -b approach-3 9906e28` brings
