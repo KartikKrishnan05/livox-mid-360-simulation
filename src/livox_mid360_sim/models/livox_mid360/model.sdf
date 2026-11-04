@@ -1,0 +1,127 @@
+<?xml version="1.0"?>
+<!--
+  Livox Mid-360 (lidar + built-in IMU) for Gazebo Harmonic.
+
+  Link origin = centre of the mounting face (bottom of the sensor).
+  Lidar origin ("livox_frame") = optical centre, ~47 mm above the mounting face.
+
+  Output (gz-transport, bridge with ros_gz_bridge):
+    /livox/points   gz.msgs.PointCloudPacked -> sensor_msgs/msg/PointCloud2 (driver layout)
+    /livox/imu_raw  gz.msgs.IMU              -> sensor_msgs/msg/Imu (m/s^2)
+  livox_driver_emulator turns these into /livox/lidar (CustomMsg) + /livox/imu (g).
+
+  The world needs the Sensors (ogre2) and Imu systems.
+-->
+<sdf version="1.9">
+  <model name="livox_mid360">
+    <link name="lidar_link">
+      <inertial>
+        <pose>0 0 0.03 0 0 0</pose>
+        <mass>0.265</mass>
+        <inertia>
+          <ixx>1.73e-4</ixx><ixy>0</ixy><ixz>0</ixz>
+          <iyy>1.73e-4</iyy><iyz>0</iyz>
+          <izz>1.87e-4</izz>
+        </inertia>
+      </inertial>
+
+      <collision name="collision">
+        <pose>0 0 0.03 0 0 0</pose>
+        <geometry><box><size>0.065 0.065 0.06</size></box></geometry>
+      </collision>
+
+      <visual name="base">
+        <pose>0 0 0.0175 0 0 0</pose>
+        <geometry><box><size>0.065 0.065 0.035</size></box></geometry>
+        <material>
+          <ambient>0.15 0.15 0.15 1</ambient>
+          <diffuse>0.2 0.2 0.2 1</diffuse>
+        </material>
+      </visual>
+      <visual name="window">
+        <pose>0 0 0.0475 0 0 0</pose>
+        <geometry><cylinder><radius>0.029</radius><length>0.025</length></cylinder></geometry>
+        <material>
+          <ambient>0.05 0.05 0.08 1</ambient>
+          <diffuse>0.05 0.05 0.1 1</diffuse>
+          <specular>0.6 0.6 0.6 1</specular>
+        </material>
+      </visual>
+
+      <!-- Dense range image that the LivoxMid360System resamples. Its update_rate is
+           frame_rate * slices in sliced mode (50), frame_rate in snapshot mode (10); in
+           raycast mode it only marks the lidar origin and is not rendered. -->
+      <sensor name="livox_dense_lidar" type="gpu_lidar">
+        <pose>0 0 0.047 0 0 0</pose>
+        <topic>/livox/dense_scan</topic>
+        <gz_frame_id>livox_frame</gz_frame_id>
+        <update_rate>50</update_rate>
+        <always_on>true</always_on>
+        <visualize>false</visualize>
+        <lidar>
+          <scan>
+            <horizontal>
+              <samples>1440</samples>
+              <resolution>1</resolution>
+              <min_angle>-3.14159265</min_angle>
+              <max_angle>3.14159265</max_angle>
+            </horizontal>
+            <vertical>
+              <samples>160</samples>
+              <resolution>1</resolution>
+              <min_angle>-0.1309</min_angle>
+              <max_angle>0.9163</max_angle>
+            </vertical>
+          </scan>
+          <range>
+            <min>0.1</min>
+            <max>70.0</max>
+            <resolution>0.002</resolution>
+          </range>
+          <noise>
+            <type>gaussian</type>
+            <mean>0.0</mean>
+            <stddev>0.02</stddev>
+          </noise>
+        </lidar>
+      </sensor>
+
+      <!-- Built-in IMU (ICM-40609). Pose of the IMU in the lidar frame per Livox spec. -->
+      <sensor name="livox_imu" type="imu">
+        <pose>0.011 0.02329 0.00288 0 0 0</pose>
+        <topic>/livox/imu_raw</topic>
+        <gz_frame_id>livox_frame</gz_frame_id>
+        <update_rate>200</update_rate>
+        <always_on>true</always_on>
+        <visualize>false</visualize>
+        <imu>
+          <angular_velocity>
+            <x><noise type="gaussian"><mean>0</mean><stddev>2e-4</stddev><bias_mean>7.5e-6</bias_mean><bias_stddev>8e-7</bias_stddev></noise></x>
+            <y><noise type="gaussian"><mean>0</mean><stddev>2e-4</stddev><bias_mean>7.5e-6</bias_mean><bias_stddev>8e-7</bias_stddev></noise></y>
+            <z><noise type="gaussian"><mean>0</mean><stddev>2e-4</stddev><bias_mean>7.5e-6</bias_mean><bias_stddev>8e-7</bias_stddev></noise></z>
+          </angular_velocity>
+          <linear_acceleration>
+            <x><noise type="gaussian"><mean>0</mean><stddev>1.7e-2</stddev><bias_mean>0.1</bias_mean><bias_stddev>1e-3</bias_stddev></noise></x>
+            <y><noise type="gaussian"><mean>0</mean><stddev>1.7e-2</stddev><bias_mean>0.1</bias_mean><bias_stddev>1e-3</bias_stddev></noise></y>
+            <z><noise type="gaussian"><mean>0</mean><stddev>1.7e-2</stddev><bias_mean>0.1</bias_mean><bias_stddev>1e-3</bias_stddev></noise></z>
+          </linear_acceleration>
+        </imu>
+      </sensor>
+    </link>
+
+    <plugin filename="LivoxMid360System" name="livox_mid360_sim::LivoxMid360System">
+      <input_topic>/livox/dense_scan</input_topic>
+      <output_topic>/livox/points</output_topic>
+      <frame_id>livox_frame</frame_id>
+      <frame_rate>10</frame_rate>
+      <points_per_second>200000</points_per_second>
+      <min_range>0.1</min_range>
+      <max_range>40.0</max_range>
+      <!-- snapshot | sliced | raycast, see src/livox_mid360_system.cpp -->
+      <mode>sliced</mode>
+      <slices>5</slices>
+      <sensor_name>livox_dense_lidar</sensor_name>
+      <range_noise>0.02</range_noise>
+    </plugin>
+  </model>
+</sdf>

@@ -1,0 +1,33 @@
+[workspace]
+name = "livox-mid-360-simulation"
+description = "Livox Mid-360 lidar simulation for ROS 2 Jazzy + Gazebo Harmonic"
+channels = ["robostack-jazzy", "conda-forge"]
+platforms = ["osx-arm64", "linux-64", "linux-aarch64"]
+
+[dependencies]
+ros-jazzy-desktop = "*"
+ros-jazzy-ros-gz = "*"
+ros-jazzy-gz-sim-vendor = "*"
+ros-jazzy-gz-transport-vendor = "*"
+ros-jazzy-gz-msgs-vendor = "*"
+ros-jazzy-gz-plugin-vendor = "*"
+ros-jazzy-xacro = "*"
+ros-jazzy-robot-state-publisher = "*"
+ros-jazzy-teleop-twist-keyboard = "*"
+colcon-common-extensions = "*"
+cmake = "*"
+ninja = "*"
+pkg-config = "*"
+compilers = "*"
+setuptools = "*"
+numpy = "*"
+
+[activation]
+scripts = ["scripts/activate.sh"]
+
+[tasks]
+build = { cmd = "colcon build --symlink-install --cmake-args -DBUILD_TESTING=OFF -DCMAKE_BUILD_TYPE=Release", description = "Build the colcon workspace" }
+clean = { cmd = "rm -rf build install log", description = "Remove colcon build outputs" }
+sim = { cmd = "bash scripts/run_sim.sh", depends-on = ["build"], description = "Launch Gazebo + bridge (+ RViz) with the Mid-360" }
+check = { cmd = "bash scripts/check_topics.sh", description = "Verify the simulated Mid-360 topics are publishing" }
+smoke = { cmd = "bash scripts/smoke_test.sh", depends-on = ["build"], description = "Headless launch + checks + CPU usage" }

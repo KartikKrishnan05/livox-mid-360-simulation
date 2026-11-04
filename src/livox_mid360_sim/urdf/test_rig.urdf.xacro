@@ -1,0 +1,105 @@
+<?xml version="1.0"?>
+<!-- Small differential-drive test robot carrying a Livox Mid-360. Drive it with /cmd_vel. -->
+<robot name="livox_test_rig" xmlns:xacro="http://www.ros.org/wiki/xacro">
+  <xacro:include filename="$(find livox_mid360_sim)/urdf/livox_mid360.urdf.xacro"/>
+
+  <xacro:property name="body_l" value="0.50"/>
+  <xacro:property name="body_w" value="0.36"/>
+  <xacro:property name="body_h" value="0.14"/>
+  <xacro:property name="wheel_r" value="0.08"/>
+  <xacro:property name="wheel_w" value="0.04"/>
+  <xacro:property name="mast_h" value="0.45"/>
+
+  <link name="base_link"/>
+
+  <joint name="chassis_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="chassis"/>
+    <origin xyz="0 0 ${wheel_r}"/>
+  </joint>
+
+  <link name="chassis">
+    <inertial>
+      <mass value="8.0"/>
+      <inertia ixx="0.1" ixy="0" ixz="0" iyy="0.18" iyz="0" izz="0.25"/>
+    </inertial>
+    <collision>
+      <geometry><box size="${body_l} ${body_w} ${body_h}"/></geometry>
+    </collision>
+    <visual>
+      <geometry><box size="${body_l} ${body_w} ${body_h}"/></geometry>
+      <material name="rig_orange"><color rgba="0.9 0.45 0.1 1"/></material>
+    </visual>
+    <visual>
+      <origin xyz="0.12 0 ${body_h / 2 + mast_h / 2}"/>
+      <geometry><cylinder radius="0.02" length="${mast_h}"/></geometry>
+      <material name="rig_grey"><color rgba="0.6 0.6 0.6 1"/></material>
+    </visual>
+  </link>
+
+  <xacro:macro name="wheel" params="side y">
+    <joint name="${side}_wheel_joint" type="continuous">
+      <parent link="chassis"/>
+      <child link="${side}_wheel"/>
+      <origin xyz="-0.08 ${y} 0" rpy="${-pi / 2} 0 0"/>
+      <axis xyz="0 0 1"/>
+    </joint>
+    <link name="${side}_wheel">
+      <inertial>
+        <mass value="0.5"/>
+        <inertia ixx="1e-3" ixy="0" ixz="0" iyy="1e-3" iyz="0" izz="1.6e-3"/>
+      </inertial>
+      <collision><geometry><cylinder radius="${wheel_r}" length="${wheel_w}"/></geometry></collision>
+      <visual>
+        <geometry><cylinder radius="${wheel_r}" length="${wheel_w}"/></geometry>
+        <material name="rig_black"><color rgba="0.1 0.1 0.1 1"/></material>
+      </visual>
+    </link>
+  </xacro:macro>
+
+  <xacro:wheel side="left" y="${body_w / 2 + wheel_w / 2 + 0.01}"/>
+  <xacro:wheel side="right" y="${-(body_w / 2 + wheel_w / 2 + 0.01)}"/>
+
+  <joint name="caster_joint" type="fixed">
+    <parent link="chassis"/>
+    <child link="caster"/>
+    <origin xyz="${body_l / 2 - 0.06} 0 ${-wheel_r / 2}"/>
+  </joint>
+  <link name="caster">
+    <inertial>
+      <mass value="0.2"/>
+      <inertia ixx="1e-4" ixy="0" ixz="0" iyy="1e-4" iyz="0" izz="1e-4"/>
+    </inertial>
+    <collision><geometry><sphere radius="${wheel_r / 2}"/></geometry></collision>
+    <visual><geometry><sphere radius="${wheel_r / 2}"/></geometry></visual>
+  </link>
+  <gazebo reference="caster">
+    <collision>
+      <surface><friction><ode><mu>0.0</mu><mu2>0.0</mu2></ode></friction></surface>
+    </collision>
+  </gazebo>
+
+  <!-- lidar_mode: snapshot | sliced | raycast; slices: GPU images per frame in sliced mode -->
+  <xacro:arg name="lidar_mode" default="sliced"/>
+  <xacro:arg name="slices" default="5"/>
+  <xacro:livox_mid360 parent="chassis" xyz="0.12 0 ${body_h / 2 + mast_h}"
+    mode="$(arg lidar_mode)" slices="$(arg slices)"/>
+
+  <gazebo>
+    <plugin filename="gz-sim-diff-drive-system" name="gz::sim::systems::DiffDrive">
+      <left_joint>left_wheel_joint</left_joint>
+      <right_joint>right_wheel_joint</right_joint>
+      <wheel_separation>${body_w + wheel_w + 0.02}</wheel_separation>
+      <wheel_radius>${wheel_r}</wheel_radius>
+      <topic>/cmd_vel</topic>
+      <odom_topic>/odom</odom_topic>
+      <tf_topic>/tf</tf_topic>
+      <frame_id>odom</frame_id>
+      <child_frame_id>base_link</child_frame_id>
+      <odom_publish_frequency>30</odom_publish_frequency>
+    </plugin>
+    <plugin filename="gz-sim-joint-state-publisher-system" name="gz::sim::systems::JointStatePublisher">
+      <topic>/joint_states</topic>
+    </plugin>
+  </gazebo>
+</robot>
