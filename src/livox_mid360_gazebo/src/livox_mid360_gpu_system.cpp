@@ -56,14 +56,7 @@ public:
     edge_threshold_ = get_d("edge_threshold", 0.1);
     points_per_frame_ = static_cast<std::size_t>(std::lround(point_rate_ / frame_rate_));
 
-    ReturnModelParams rp;
-    rp.min_range = get_d("min_range", rp.min_range);
-    rp.max_range = get_d("max_range", rp.max_range);
-    rp.nominal_range = get_d("nominal_range", rp.nominal_range);
-    rp.range_noise_stddev = get_d("range_noise_stddev", rp.range_noise_stddev);
-    rp.default_reflectivity = get_d("default_reflectivity", rp.default_reflectivity);
-    rp.seed = static_cast<unsigned>(get_d("seed", 0));
-    model_ = ReturnModel(rp);
+    model_ = ReturnModel(ReturnModelParamsFromSdf(get_d));
 
     const std::string uri = get_s("pattern_file", "model://livox_mid360/scan_mode/mid360.csv");
     const std::string path = ResolveResourceUri(uri);
@@ -131,11 +124,16 @@ private:
       }
       const DenseScan & scan = *renders_[k];
       const PatternRay & ray = pattern_[cursor_ + i];
-      double r, retro;
-      if (!scan.Sample(ray.az, ray.el, edge_threshold_, r, retro)) {continue;}
+      // Sample along the scattered beam; report along the nominal pattern direction.
+      double d_az, d_el;
+      model_.AngularNoise(ray.el, d_az, d_el);
+      double r, retro, cos_inc;
+      if (!scan.Sample(ray.az + d_az, ray.el + d_el, edge_threshold_, r, retro, cos_inc)) {
+        continue;
+      }
       float range;
       uint8_t refl;
-      if (!model_.Apply(r, retro, range, refl)) {continue;}
+      if (!model_.Apply(r, retro, cos_inc, range, refl)) {continue;}
       LivoxPoint p;
       p.x = ray.dx * range;
       p.y = ray.dy * range;

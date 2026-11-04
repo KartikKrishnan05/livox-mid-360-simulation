@@ -50,7 +50,13 @@ struct DenseScan
   /// Range along (az, el). Bilinear (in 1/r, exact for planes to first order) when the
   /// four neighbours are hits on one continuous surface (spread <= rel_edge * r_min),
   /// nearest neighbour otherwise (edges, mixed hit/miss). False = no return.
-  bool Sample(double az, double el, double rel_edge, double & r_out, double & retro_out) const
+  /// cos_out: |cos| of the incidence angle, from the range gradient of the render around
+  /// the nearest cell: for a surface r(az, el), tan^2(inc) = (dr/del / r)^2 +
+  /// (dr/daz / (r cos el))^2. Per axis the smaller one-sided difference is used, so a depth
+  /// edge next to the cell does not read as a grazing surface.
+  bool Sample(
+    double az, double el, double rel_edge, double & r_out, double & retro_out,
+    double & cos_out) const
   {
     double fh = (az - hmin) / hstep;
     if (wrap) {
@@ -84,13 +90,53 @@ struct DenseScan
       if (hi - lo <= rel_edge * lo) {
         const double inv = (1 - b) * ((1 - a) / r00 + a / r01) + b * ((1 - a) / r10 + a / r11);
         r_out = 1.0 / inv;
+        cos_out = Incidence(vn, hn, el);
         return true;
       }
     }
     const float rn = R(vn, hn);
     if (!std::isfinite(rn) || rn <= 0) {return false;}
     r_out = rn;
+    cos_out = Incidence(vn, hn, el);
     return true;
+  }
+
+private:
+  static bool Valid(float r) {return std::isfinite(r) && r > 0;}
+
+  /// Smaller (in magnitude) one-sided range difference at (v, h) along h or v; 0 if none.
+  double MinDiff(int v, int h, bool along_h) const
+  {
+    const float r0 = R(v, h);
+    double best = 0.0;
+    bool found = false;
+    for (int s : {-1, 1}) {
+      int vv = v, hh = h;
+      if (along_h) {
+        hh += s;
+        if (hh < 0 || hh >= nh) {
+          if (!wrap) {continue;}
+          hh = (hh + nh) % nh;
+        }
+      } else {
+        vv += s;
+        if (vv < 0 || vv >= nv) {continue;}
+      }
+      const float r1 = R(vv, hh);
+      if (!Valid(r1)) {continue;}
+      const double diff = (r1 - r0) * s;     // forward difference per +1 cell
+      if (!found || std::abs(diff) < std::abs(best)) {best = diff; found = true;}
+    }
+    return best;
+  }
+
+  double Incidence(int v, int h, double el) const
+  {
+    const float r0 = R(v, h);
+    if (!Valid(r0)) {return 1.0;}
+    const double th = MinDiff(v, h, true) / (std::abs(hstep) * r0 * std::max(std::cos(el), 1e-3));
+    const double tv = nv > 1 ? MinDiff(v, h, false) / (std::abs(vstep) * r0) : 0.0;
+    return 1.0 / std::sqrt(1.0 + th * th + tv * tv);
   }
 };
 

@@ -12,6 +12,15 @@
            ${frame_id}       optical centre, 47 mm above the mounting face; points and IMU
                              messages are expressed here (like the real driver).
   The IMU sensor is at (0.011, 0.02329, -0.04412) in ${frame_id}.
+
+  Realism (defaults = Mid-360 datasheet where it gives a value):
+    range_noise     range 1 sigma [m] @ 10 m (3/2 of it @ 0.2 m, more near the detection limit);
+                    0 turns range noise off
+    angular_noise   beam direction 1 sigma [deg] (datasheet < 0.15); 0 turns it off
+    default_reflectivity  Livox reflectivity (0..150 = 0..100 % diffuse) of surfaces
+                    without <laser_retro>
+    gyro_* [rad/s], accel_* [m/s^2]: white noise, turn-on bias, bias drift (1 sigma);
+    imu_bias_tau [s] correlation time of the drift. imu_bias:=false zeroes both bias terms.
 -->
 <robot xmlns:xacro="http://www.ros.org/wiki/xacro">
   <xacro:macro name="livox_mid360"
@@ -22,7 +31,11 @@
             geometry_source:=collision
             dense_h_samples:=1440 dense_v_samples:=160
             pattern_file:=model://livox_mid360/scan_mode/mid360.csv
-            range_noise:=0.02 min_range:=0.1 max_range:=70.0 nominal_range:=40.0">
+            range_noise:=0.02 angular_noise:=0.15 default_reflectivity:=100
+            min_range:=0.1 max_range:=70.0 nominal_range:=40.0
+            gyro_noise:=6.6e-4 gyro_bias:=1.7e-3 gyro_bias_drift:=2.4e-5
+            accel_noise:=0.01 accel_bias:=0.05 accel_bias_drift:=1.0e-3 imu_bias_tau:=300
+            imu_bias:=true">
 
     <link name="${frame_id}_base">
       <inertial>
@@ -101,14 +114,14 @@
         <always_on>true</always_on>
         <imu>
           <angular_velocity>
-            <x><noise type="gaussian"><mean>0</mean><stddev>6.6e-4</stddev></noise></x>
-            <y><noise type="gaussian"><mean>0</mean><stddev>6.6e-4</stddev></noise></y>
-            <z><noise type="gaussian"><mean>0</mean><stddev>6.6e-4</stddev></noise></z>
+            <x><noise type="gaussian"><mean>0</mean><stddev>${gyro_noise}</stddev><bias_mean>0</bias_mean><bias_stddev>${gyro_bias if str(imu_bias).lower() in ('true', '1') else 0}</bias_stddev><dynamic_bias_stddev>${gyro_bias_drift if str(imu_bias).lower() in ('true', '1') else 0}</dynamic_bias_stddev><dynamic_bias_correlation_time>${imu_bias_tau}</dynamic_bias_correlation_time></noise></x>
+            <y><noise type="gaussian"><mean>0</mean><stddev>${gyro_noise}</stddev><bias_mean>0</bias_mean><bias_stddev>${gyro_bias if str(imu_bias).lower() in ('true', '1') else 0}</bias_stddev><dynamic_bias_stddev>${gyro_bias_drift if str(imu_bias).lower() in ('true', '1') else 0}</dynamic_bias_stddev><dynamic_bias_correlation_time>${imu_bias_tau}</dynamic_bias_correlation_time></noise></y>
+            <z><noise type="gaussian"><mean>0</mean><stddev>${gyro_noise}</stddev><bias_mean>0</bias_mean><bias_stddev>${gyro_bias if str(imu_bias).lower() in ('true', '1') else 0}</bias_stddev><dynamic_bias_stddev>${gyro_bias_drift if str(imu_bias).lower() in ('true', '1') else 0}</dynamic_bias_stddev><dynamic_bias_correlation_time>${imu_bias_tau}</dynamic_bias_correlation_time></noise></z>
           </angular_velocity>
           <linear_acceleration>
-            <x><noise type="gaussian"><mean>0</mean><stddev>0.01</stddev></noise></x>
-            <y><noise type="gaussian"><mean>0</mean><stddev>0.01</stddev></noise></y>
-            <z><noise type="gaussian"><mean>0</mean><stddev>0.01</stddev></noise></z>
+            <x><noise type="gaussian"><mean>0</mean><stddev>${accel_noise}</stddev><bias_mean>0</bias_mean><bias_stddev>${accel_bias if str(imu_bias).lower() in ('true', '1') else 0}</bias_stddev><dynamic_bias_stddev>${accel_bias_drift if str(imu_bias).lower() in ('true', '1') else 0}</dynamic_bias_stddev><dynamic_bias_correlation_time>${imu_bias_tau}</dynamic_bias_correlation_time></noise></x>
+            <y><noise type="gaussian"><mean>0</mean><stddev>${accel_noise}</stddev><bias_mean>0</bias_mean><bias_stddev>${accel_bias if str(imu_bias).lower() in ('true', '1') else 0}</bias_stddev><dynamic_bias_stddev>${accel_bias_drift if str(imu_bias).lower() in ('true', '1') else 0}</dynamic_bias_stddev><dynamic_bias_correlation_time>${imu_bias_tau}</dynamic_bias_correlation_time></noise></y>
+            <z><noise type="gaussian"><mean>0</mean><stddev>${accel_noise}</stddev><bias_mean>0</bias_mean><bias_stddev>${accel_bias if str(imu_bias).lower() in ('true', '1') else 0}</bias_stddev><dynamic_bias_stddev>${accel_bias_drift if str(imu_bias).lower() in ('true', '1') else 0}</dynamic_bias_stddev><dynamic_bias_correlation_time>${imu_bias_tau}</dynamic_bias_correlation_time></noise></z>
           </linear_acceleration>
         </imu>
       </sensor>
@@ -129,6 +142,9 @@
         <max_range>${max_range}</max_range>
         <nominal_range>${nominal_range}</nominal_range>
         <range_noise_stddev>${range_noise}</range_noise_stddev>
+        <near_range_noise_stddev>${1.5 * float(range_noise)}</near_range_noise_stddev>
+        <angular_noise_stddev_deg>${angular_noise}</angular_noise_stddev_deg>
+        <default_reflectivity>${default_reflectivity}</default_reflectivity>
       </plugin>
     </gazebo>
   </xacro:macro>

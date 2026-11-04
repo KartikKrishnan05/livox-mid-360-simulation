@@ -107,6 +107,8 @@ def _setup(context):
                       'geometry_source': cfg['geometry_source'],
                       'dense_rate': dense_rate,
                       'range_noise': cfg['range_noise'],
+                      'angular_noise': cfg['angular_noise'],
+                      'imu_bias': cfg['imu_bias'],
                       'dense_h': cfg['dense_h'],
                       'dense_v': cfg['dense_v']}).toxml()
         actions += [
@@ -159,6 +161,10 @@ def generate_launch_description():
         DeclareLaunchArgument('geometry_source', default_value='collision',
                               description='raycast, xacro: collision | visual geometry'),
         DeclareLaunchArgument('range_noise', default_value='0.02',
-                              description='xacro: range noise stddev [m]'),
+                              description='xacro: range noise stddev [m] @ 10 m (0 = off)'),
+        DeclareLaunchArgument('angular_noise', default_value='0.15',
+                              description='xacro: beam direction noise stddev [deg] (0 = off)'),
+        DeclareLaunchArgument('imu_bias', default_value='true',
+                              description='xacro: IMU turn-on bias and bias drift'),
         OpaqueFunction(function=_setup),
     ])

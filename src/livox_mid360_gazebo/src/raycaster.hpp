@@ -42,7 +42,9 @@ struct TriMesh
   std::vector<int> order;
   Aabb bounds;
   void Build();
-  bool Intersect(const Vector3d & o, const Vector3d & d, double tmin, double & tmax) const;
+  /// On a hit, n is the hit triangle's (unnormalised) normal.
+  bool Intersect(const Vector3d & o, const Vector3d & d, double tmin, double & tmax,
+    Vector3d & n) const;
 };
 
 enum class ShapeKind {kBox, kSphere, kCylinder, kCapsule, kEllipsoid, kPlane, kMesh};
@@ -63,6 +65,7 @@ struct RayHit
 {
   double t{0.0};
   int shape{-1};
+  double cos_inc{1.0};    // |cos| of the angle between the ray and the surface normal
 };
 
 class Raycaster
@@ -81,8 +84,9 @@ public:
   bool Cast(const Vector3d & o, const Vector3d & d, double tmin, double tmax, RayHit & hit) const;
 
 private:
+  /// On a hit, n is the surface normal in the shape's local frame (not normalised).
   bool IntersectShape(const Shape & s, const Vector3d & o, const Vector3d & d, double tmin,
-    double & tmax) const;
+    double & tmax, Vector3d & n) const;
   std::vector<Shape> shapes_;
   std::vector<int> planes_;                    // unbounded shapes, tested always
   struct Node {Aabb box; int left{-1}; int first{0}; int count{0};};

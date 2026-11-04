@@ -98,16 +98,21 @@ inline bool QuadRoot(double a, double b, double c, double tmin, double tmax, dou
   return false;
 }
 
-inline bool Sphere(const Vector3d & o, const Vector3d & d, double r, double tmin, double & tmax)
+inline bool Sphere(const Vector3d & o, const Vector3d & d, double r, double tmin, double & tmax,
+  Vector3d & n)
 {
   double t;
-  if (QuadRoot(d.Dot(d), o.Dot(d), o.Dot(o) - r * r, tmin, tmax, t)) {tmax = t; return true;}
+  if (QuadRoot(d.Dot(d), o.Dot(d), o.Dot(o) - r * r, tmin, tmax, t)) {
+    tmax = t;
+    n = o + d * t;
+    return true;
+  }
   return false;
 }
 
 // Cylinder along local z, |z| <= h; caps optional.
 inline bool Cylinder(const Vector3d & o, const Vector3d & d, double r, double h, bool caps,
-  double tmin, double & tmax)
+  double tmin, double & tmax, Vector3d & n)
 {
   bool hit = false;
   const double a = d.X() * d.X() + d.Y() * d.Y();
@@ -117,7 +122,12 @@ inline bool Cylinder(const Vector3d & o, const Vector3d & d, double r, double h,
   if (a > 0 && disc >= 0) {
     const double sq = std::sqrt(disc);
     for (double t : {(-b - sq) / a, (-b + sq) / a}) {
-      if (t > tmin && t < tmax && std::abs(o.Z() + t * d.Z()) <= h) {tmax = t; hit = true; break;}
+      if (t > tmin && t < tmax && std::abs(o.Z() + t * d.Z()) <= h) {
+        tmax = t;
+        n.Set(o.X() + t * d.X(), o.Y() + t * d.Y(), 0.0);
+        hit = true;
+        break;
+      }
     }
   }
   if (caps && d.Z() != 0.0) {
@@ -125,7 +135,7 @@ inline bool Cylinder(const Vector3d & o, const Vector3d & d, double r, double h,
       const double t = (zc - o.Z()) / d.Z();
       if (t > tmin && t < tmax) {
         const double x = o.X() + t * d.X(), y = o.Y() + t * d.Y();
-        if (x * x + y * y <= r * r) {tmax = t; hit = true;}
+        if (x * x + y * y <= r * r) {tmax = t; n.Set(0.0, 0.0, zc); hit = true;}
       }
     }
   }
@@ -147,7 +157,8 @@ void TriMesh::Build()
   BuildBvh(boxes, nodes, order);
 }
 
-bool TriMesh::Intersect(const Vector3d & o, const Vector3d & d, double tmin, double & tmax) const
+bool TriMesh::Intersect(const Vector3d & o, const Vector3d & d, double tmin, double & tmax,
+  Vector3d & n) const
 {
   if (nodes.empty()) {return false;}
   const Vector3d inv = Inverse(d);
@@ -156,10 +167,10 @@ bool TriMesh::Intersect(const Vector3d & o, const Vector3d & d, double tmin, dou
   int sp = 0;
   stack[sp++] = 0;
   while (sp) {
-    const Node & n = nodes[stack[--sp]];
-    if (!HitBox(n.box, o, inv, tmin, tmax)) {continue;}
-    if (n.left < 0) {
-      for (int k = n.first; k < n.first + n.count; ++k) {
+    const Node & node = nodes[stack[--sp]];
+    if (!HitBox(node.box, o, inv, tmin, tmax)) {continue;}
+    if (node.left < 0) {
+      for (int k = node.first; k < node.first + node.count; ++k) {
         const int i = order[k];
         const Vector3d p = d.Cross(e2[i]);
         const double det = e1[i].Dot(p);
@@ -172,11 +183,11 @@ bool TriMesh::Intersect(const Vector3d & o, const Vector3d & d, double tmin, dou
         const double v = d.Dot(q) * id;
         if (v < 0 || u + v > 1) {continue;}
         const double t = e2[i].Dot(q) * id;
-        if (t > tmin && t < tmax) {tmax = t; hit = true;}
+        if (t > tmin && t < tmax) {tmax = t; n = e1[i].Cross(e2[i]); hit = true;}
       }
     } else if (sp < 62) {
-      stack[sp++] = n.left;
-      stack[sp++] = n.left + 1;
+      stack[sp++] = node.left;
+      stack[sp++] = node.left + 1;
     }
   }
   return hit;
@@ -275,7 +286,7 @@ void Raycaster::Commit()
 }
 
 bool Raycaster::IntersectShape(const Shape & s, const Vector3d & ow, const Vector3d & dw,
-  double tmin, double & tmax) const
+  double tmin, double & tmax, Vector3d & n) const
 {
   // To the shape's local frame (rotation preserves t).
   const Vector3d o = s.world.Rot().RotateVectorReverse(ow - s.world.Pos());
@@ -288,6 +299,7 @@ bool Raycaster::IntersectShape(const Shape & s, const Vector3d & ow, const Vecto
         b.hi = h;
         const Vector3d inv = Inverse(d);
         double t0 = tmin, t1 = tmax;
+        int a0 = -1, a1 = -1;          // axis of the entry / exit face
         for (int a = 0; a < 3; ++a) {
           double ta = (b.lo[a] - o[a]) * inv[a], tb = (b.hi[a] - o[a]) * inv[a];
           if (std::isnan(ta) || std::isnan(tb)) {
@@ -295,27 +307,38 @@ bool Raycaster::IntersectShape(const Shape & s, const Vector3d & ow, const Vecto
             continue;
           }
           if (ta > tb) {std::swap(ta, tb);}
-          t0 = std::max(t0, ta);
-          t1 = std::min(t1, tb);
+          if (ta > t0) {t0 = ta; a0 = a;}
+          if (tb < t1) {t1 = tb; a1 = a;}
           if (t1 < t0) {return false;}
         }
         // Entry point, or exit point if the origin is inside the box.
-        const double t = t0 > tmin ? t0 : t1;
-        if (t > tmin && t < tmax) {tmax = t; return true;}
+        const bool entry = t0 > tmin;
+        const double t = entry ? t0 : t1;
+        const int ax = entry ? a0 : a1;
+        if (t > tmin && t < tmax && ax >= 0) {
+          tmax = t;
+          n.Set(0, 0, 0);
+          n[ax] = 1.0;
+          return true;
+        }
         return false;
       }
-    case ShapeKind::kSphere: return Sphere(o, d, s.size.X(), tmin, tmax);
+    case ShapeKind::kSphere: return Sphere(o, d, s.size.X(), tmin, tmax, n);
     case ShapeKind::kEllipsoid: {
         const Vector3d os(o.X() / s.size.X(), o.Y() / s.size.Y(), o.Z() / s.size.Z());
         const Vector3d ds(d.X() / s.size.X(), d.Y() / s.size.Y(), d.Z() / s.size.Z());
-        return Sphere(os, ds, 1.0, tmin, tmax);   // t is invariant under the scaling
+        // t is invariant under the scaling; the normal (gradient of |p / radii|^2) is not.
+        Vector3d ns;
+        if (!Sphere(os, ds, 1.0, tmin, tmax, ns)) {return false;}
+        n.Set(ns.X() / s.size.X(), ns.Y() / s.size.Y(), ns.Z() / s.size.Z());
+        return true;
       }
     case ShapeKind::kCylinder:
-      return Cylinder(o, d, s.size.X(), s.size.Y() * 0.5, true, tmin, tmax);
+      return Cylinder(o, d, s.size.X(), s.size.Y() * 0.5, true, tmin, tmax, n);
     case ShapeKind::kCapsule: {
-        bool hit = Cylinder(o, d, s.size.X(), s.size.Y() * 0.5, false, tmin, tmax);
+        bool hit = Cylinder(o, d, s.size.X(), s.size.Y() * 0.5, false, tmin, tmax, n);
         for (double zc : {-0.5 * s.size.Y(), 0.5 * s.size.Y()}) {
-          hit |= Sphere(o - Vector3d(0, 0, zc), d, s.size.X(), tmin, tmax);
+          hit |= Sphere(o - Vector3d(0, 0, zc), d, s.size.X(), tmin, tmax, n);
         }
         return hit;
       }
@@ -323,10 +346,10 @@ bool Raycaster::IntersectShape(const Shape & s, const Vector3d & ow, const Vecto
         const double den = s.size.Dot(d);
         if (den == 0.0) {return false;}
         const double t = -s.size.Dot(o) / den;
-        if (t > tmin && t < tmax) {tmax = t; return true;}
+        if (t > tmin && t < tmax) {tmax = t; n = s.size; return true;}
         return false;
       }
-    case ShapeKind::kMesh: return s.mesh->Intersect(o, d, tmin, tmax);
+    case ShapeKind::kMesh: return s.mesh->Intersect(o, d, tmin, tmax, n);
   }
   return false;
 }
@@ -335,32 +358,42 @@ bool Raycaster::Cast(const Vector3d & o, const Vector3d & d, double tmin, double
   RayHit & hit) const
 {
   bool any = false;
+  Vector3d n, n_best;
+  // The hit's normal, rotated to the world frame, against the (unit) ray direction.
+  auto finish = [&]() {
+      if (!any) {return false;}
+      hit.t = tmax;
+      const Vector3d nw = shapes_[hit.shape].world.Rot().RotateVector(n_best);
+      const double len = nw.Length();
+      hit.cos_inc = len > 0.0 ? std::min(1.0, std::abs(nw.Dot(d)) / len) : 1.0;
+      return true;
+    };
   for (int i : planes_) {
-    if (IntersectShape(shapes_[i], o, d, tmin, tmax)) {hit.shape = i; any = true;}
+    if (IntersectShape(shapes_[i], o, d, tmin, tmax, n)) {hit.shape = i; n_best = n; any = true;}
   }
-  if (nodes_.empty()) {
-    if (any) {hit.t = tmax;}
-    return any;
-  }
+  if (nodes_.empty()) {return finish();}
   const Vector3d inv = Inverse(d);
   int stack[64];
   int sp = 0;
   stack[sp++] = 0;
   while (sp) {
-    const Node & n = nodes_[stack[--sp]];
-    if (!HitBox(n.box, o, inv, tmin, tmax)) {continue;}
-    if (n.left < 0) {
-      for (int k = n.first; k < n.first + n.count; ++k) {
+    const Node & node = nodes_[stack[--sp]];
+    if (!HitBox(node.box, o, inv, tmin, tmax)) {continue;}
+    if (node.left < 0) {
+      for (int k = node.first; k < node.first + node.count; ++k) {
         const int i = order_[k];
-        if (IntersectShape(shapes_[i], o, d, tmin, tmax)) {hit.shape = i; any = true;}
+        if (IntersectShape(shapes_[i], o, d, tmin, tmax, n)) {
+          hit.shape = i;
+          n_best = n;
+          any = true;
+        }
       }
     } else if (sp < 62) {
-      stack[sp++] = n.left;
-      stack[sp++] = n.left + 1;
+      stack[sp++] = node.left;
+      stack[sp++] = node.left + 1;
     }
   }
-  if (any) {hit.t = tmax;}
-  return any;
+  return finish();
 }
 
 }  // namespace livox_mid360_gazebo

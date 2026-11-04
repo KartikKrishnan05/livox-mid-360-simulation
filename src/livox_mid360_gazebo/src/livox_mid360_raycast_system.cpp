@@ -82,13 +82,7 @@ public:
     points_per_frame_ = static_cast<std::size_t>(std::lround(point_rate_ / frame_rate_));
     dt_ns_ = 1e9 / point_rate_;
 
-    ReturnModelParams rp;
-    rp.min_range = get_d("min_range", rp.min_range);
-    rp.max_range = get_d("max_range", rp.max_range);
-    rp.nominal_range = get_d("nominal_range", rp.nominal_range);
-    rp.range_noise_stddev = get_d("range_noise_stddev", rp.range_noise_stddev);
-    rp.default_reflectivity = get_d("default_reflectivity", rp.default_reflectivity);
-    rp.seed = static_cast<unsigned>(get_d("seed", 0));
+    const ReturnModelParams rp = ReturnModelParamsFromSdf(get_d);
     params_ = rp;
     returns_ = ReturnModel(rp);
 
@@ -175,13 +169,24 @@ private:
   {
     ++rays_;
     const PatternRay & ray = pattern_[g % pattern_.size()];
-    const Vector3d d = pose.Rot().RotateVector(Vector3d(ray.dx, ray.dy, ray.dz));
+    // The beam leaves along the pattern direction scattered by the angular noise; the point
+    // is reported along the nominal direction (what the sensor believes it fired at).
+    Vector3d d_local(ray.dx, ray.dy, ray.dz);
+    double d_az, d_el;
+    returns_.AngularNoise(ray.el, d_az, d_el);
+    if (d_az != 0.0 || d_el != 0.0) {
+      const double az = ray.az + d_az, el = ray.el + d_el;
+      d_local.Set(std::cos(el) * std::cos(az), std::cos(el) * std::sin(az), std::sin(el));
+    }
+    const Vector3d d = pose.Rot().RotateVector(d_local);
     RayHit hit;
     // Rays start at min_range, like gz lidars: the housing is never seen from inside.
     if (!caster_.Cast(pose.Pos(), d, params_.min_range, params_.max_range, hit)) {return;}
     float range;
     uint8_t refl;
-    if (!returns_.Apply(hit.t, caster_.GetShape(hit.shape).retro, range, refl)) {return;}
+    if (!returns_.Apply(hit.t, caster_.GetShape(hit.shape).retro, hit.cos_inc, range, refl)) {
+      return;
+    }
     LivoxPoint p;
     p.x = ray.dx * range;
     p.y = ray.dy * range;

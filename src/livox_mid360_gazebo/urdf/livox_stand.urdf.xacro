@@ -14,6 +14,8 @@
   <xacro:arg name="pattern_file" default="model://livox_mid360/scan_mode/mid360.csv"/>
   <xacro:arg name="dense_rate" default="50"/>
   <xacro:arg name="range_noise" default="0.02"/>
+  <xacro:arg name="angular_noise" default="0.15"/>
+  <xacro:arg name="imu_bias" default="true"/>
   <xacro:arg name="dense_h" default="1440"/>
   <xacro:arg name="dense_v" default="160"/>
 
@@ -47,6 +49,7 @@
   <xacro:livox_mid360 parent="pole" xyz="0 0 ${pole_len}" rpy="0 0 0" sensor="$(arg sensor)"
                       geometry_source="$(arg geometry_source)"
                       pattern_file="$(arg pattern_file)" dense_rate="$(arg dense_rate)"
-                      range_noise="$(arg range_noise)"
+                      range_noise="$(arg range_noise)" angular_noise="$(arg angular_noise)"
+                      imu_bias="$(arg imu_bias)"
                       dense_h_samples="$(arg dense_h)" dense_v_samples="$(arg dense_v)"/>
 </robot>

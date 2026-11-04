@@ -10,8 +10,9 @@ compared with ground truth:
   * missed returns (truth hits within 0.1..40 m, sensor reported nothing),
   * spurious returns (sensor reported a point, truth hits nothing).
 
-Run against a *static* sensor, ideally with range_noise:=0.0, e.g.
-  ros2 launch livox_mid360_gazebo sim.launch.py gui:=false rviz:=false range_noise:=0.0
+Run against a *static* sensor, ideally with range_noise:=0.0 angular_noise:=0.0, e.g.
+  ros2 launch livox_mid360_gazebo sim.launch.py gui:=false rviz:=false range_noise:=0.0 \
+    angular_noise:=0.0
   ros2 run livox_mid360_gazebo eval_accuracy.py --frames 20
 
 Motion skew (--moving): with the sensor's model moving (e.g. a robot spinning in place;

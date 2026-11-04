@@ -68,7 +68,11 @@
         </lidar>
       </sensor>
 
-      <!-- Built-in IMU (ICM40609-class noise). 0.047 - 0.04412 = 0.00288 -->
+      <!-- Built-in IMU (ICM40609-class). White noise from the noise densities (gyro
+           0.0038 deg/s/sqrt(Hz), accel 100 ug/sqrt(Hz) at 100 Hz bandwidth); per-run turn-on
+           bias (gyro 0.1 deg/s, accel 5 mg, 1 sigma) and a drifting bias (Gauss-Markov, 300 s;
+           gyro ~5 deg/h, accel 0.1 mg) - typical consumer-MEMS values, not from a datasheet.
+           0.047 - 0.04412 = 0.00288 -->
       <sensor name="livox_imu" type="imu">
         <pose>0.011 0.02329 0.00288 0 0 0</pose>
         <topic>/livox/imu_raw</topic>
@@ -76,14 +80,14 @@
         <always_on>true</always_on>
         <imu>
           <angular_velocity>
-            <x><noise type="gaussian"><mean>0</mean><stddev>6.6e-4</stddev></noise></x>
-            <y><noise type="gaussian"><mean>0</mean><stddev>6.6e-4</stddev></noise></y>
-            <z><noise type="gaussian"><mean>0</mean><stddev>6.6e-4</stddev></noise></z>
+            <x><noise type="gaussian"><mean>0</mean><stddev>6.6e-4</stddev><bias_mean>0</bias_mean><bias_stddev>1.7e-3</bias_stddev><dynamic_bias_stddev>2.4e-5</dynamic_bias_stddev><dynamic_bias_correlation_time>300</dynamic_bias_correlation_time></noise></x>
+            <y><noise type="gaussian"><mean>0</mean><stddev>6.6e-4</stddev><bias_mean>0</bias_mean><bias_stddev>1.7e-3</bias_stddev><dynamic_bias_stddev>2.4e-5</dynamic_bias_stddev><dynamic_bias_correlation_time>300</dynamic_bias_correlation_time></noise></y>
+            <z><noise type="gaussian"><mean>0</mean><stddev>6.6e-4</stddev><bias_mean>0</bias_mean><bias_stddev>1.7e-3</bias_stddev><dynamic_bias_stddev>2.4e-5</dynamic_bias_stddev><dynamic_bias_correlation_time>300</dynamic_bias_correlation_time></noise></z>
           </angular_velocity>
           <linear_acceleration>
-            <x><noise type="gaussian"><mean>0</mean><stddev>0.01</stddev></noise></x>
-            <y><noise type="gaussian"><mean>0</mean><stddev>0.01</stddev></noise></y>
-            <z><noise type="gaussian"><mean>0</mean><stddev>0.01</stddev></noise></z>
+            <x><noise type="gaussian"><mean>0</mean><stddev>0.01</stddev><bias_mean>0</bias_mean><bias_stddev>0.05</bias_stddev><dynamic_bias_stddev>1.0e-3</dynamic_bias_stddev><dynamic_bias_correlation_time>300</dynamic_bias_correlation_time></noise></x>
+            <y><noise type="gaussian"><mean>0</mean><stddev>0.01</stddev><bias_mean>0</bias_mean><bias_stddev>0.05</bias_stddev><dynamic_bias_stddev>1.0e-3</dynamic_bias_stddev><dynamic_bias_correlation_time>300</dynamic_bias_correlation_time></noise></y>
+            <z><noise type="gaussian"><mean>0</mean><stddev>0.01</stddev><bias_mean>0</bias_mean><bias_stddev>0.05</bias_stddev><dynamic_bias_stddev>1.0e-3</dynamic_bias_stddev><dynamic_bias_correlation_time>300</dynamic_bias_correlation_time></noise></z>
           </linear_acceleration>
         </imu>
       </sensor>
@@ -99,7 +103,11 @@
       <min_range>0.1</min_range>
       <max_range>70.0</max_range>
       <nominal_range>40.0</nominal_range>
-      <range_noise_stddev>0.02</range_noise_stddev>
+      <!-- Return model (src/livox_output.hpp): Mid-360 datasheet values -->
+      <range_noise_stddev>0.02</range_noise_stddev>        <!-- 1 sigma @ 10 m -->
+      <near_range_noise_stddev>0.03</near_range_noise_stddev>  <!-- 1 sigma @ 0.2 m -->
+      <angular_noise_stddev_deg>0.15</angular_noise_stddev_deg>
+      <default_reflectivity>100</default_reflectivity>    <!-- surfaces without laser_retro -->
     </plugin>
   </model>
 </sdf>

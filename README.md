@@ -102,7 +102,9 @@ The stand puts `livox_frame` at z = 0.547 m in `worlds/livox_test.sdf`. Launch a
 | `geometry_source` | `collision` | `raycast`: geometry the rays hit, `collision` or `visual` |
 | `dense_rate` | `50` | `gpu`: render rate of the dense gpu_lidar |
 | `dense_h`, `dense_v` | `1440`, `160` | `gpu`: dense gpu_lidar resolution |
-| `range_noise` | `0.02` | range noise σ [m] (`0` for accuracy tests) |
+| `range_noise` | `0.02` | range noise σ [m] at 10 m (×1.5 at 0.2 m; `0` = off, for accuracy tests) |
+| `angular_noise` | `0.15` | beam direction noise σ [deg] (`0` = off, for accuracy tests) |
+| `imu_bias` | `true` | IMU turn-on bias and bias drift (`false` = white noise only) |
 
 ## Check
 
@@ -149,8 +151,30 @@ Per-point contract, matching `livox_ros_driver2` on a Mid-360:
 * PointCloud2 (xfer_format 0): packed 26-byte points `x,y,z,intensity` float32 @0,4,8,12,
   `tag` uint8 @16, `line` uint8 @17, `timestamp` float64 @18 (absolute ns).
 * 200 000 pts/s, i.e. 20 000 rays per 100 ms frame. FOV 360° × −7°..+52°. Range 0.1–40 m at
-  10 % reflectivity, at most 70 m (detection range ∝ √reflectivity). Range noise σ = 2 cm,
-  applied along the ray.
+  10 % reflectivity, at most 70 m (80 %). Noise and returns follow the realism model below.
+
+### Realism model
+
+Both sensors share one return model (`src/livox_output.hpp`). Defaults come from the
+Mid-360 datasheet where it gives a value:
+
+| effect | model | default |
+|---|---|---|
+| Reflectivity | Livox scale: 0–150 = 0–100 % diffuse, 151–255 retro-reflective. From the surface's `<laser_retro>`, else `default_reflectivity` | 100 (≈ 67 %) |
+| Incidence angle | diffuse surfaces return ρ·cos θ (Lambertian). Reported reflectivity is `refl·cos θ` (Livox compensates range, not angle), so grazing ground reads dark. Raycast: exact surface normal; gpu: estimated from the range gradient of the render | on |
+| Detection range | r_det = 40 m · (ρ·cos θ / 0.1)^0.269, the power law through both datasheet points (40 m @ 10 %, 70 m @ 80 %), hard cap `max_range`. Grazing and dark surfaces drop out at shorter range | 40 m / 70 m |
+| Detection limit | soft: P(return) = 1 / (1 + e^((r − r_det)/(0.05·r_det))), 50 % at r_det | |
+| Range noise | Gaussian along the ray, σ from 3 cm @ 0.2 m to 2 cm @ 10 m (datasheet), ×(1 + (r/r_det)²) for weak returns (×2 at the detection limit) | `range_noise` 0.02 |
+| Angular noise | the beam leaves along the pattern direction scattered by σ, the point is reported along the nominal direction (datasheet: < 0.15°, 1σ) | `angular_noise` 0.15° |
+| IMU (ICM40609) | white noise from the noise densities (gyro 6.6e-4 rad/s, accel 0.01 m/s² at 200 Hz), per-run turn-on bias (gyro 0.1 °/s, accel 5 mg) and Gauss-Markov bias drift (τ 300 s, gyro ≈ 5 °/h, accel 0.1 mg). The bias values are typical consumer-MEMS figures, not datasheet ones | `imu_bias` true |
+
+Checked with the model alone: σ = 29.9 mm at 0.2 m and 20.4 mm at 10 m; a 10 % target
+returns 88 / 50 / 12 % of the time at 36 / 40 / 44 m; a 20 % target at 20 m reads
+reflectivity 30 / 15 / 5 / 3 at 0 / 60 / 80 / 85° incidence.
+
+Not modelled: mixed pixels at depth edges (one exact ray per point; the gpu sensor uses
+nearest-neighbour at edges), multiple returns, rain/dust and their `tag` bits (`tag` is
+always 0), sunlight, and per-material reflectivity beyond `<laser_retro>`.
 
 Frames:
 
@@ -251,7 +275,8 @@ One depth image per frame, as in the existing GPU-based Mid-360 simulations, is
 Plugin parameters (`model.sdf`): `link_name` (`lidar_link`), `frame_offset`
 (`0 0 0.047 0 0 0`: livox_frame relative to the link), `geometry_source`, `frame_id`,
 `points_topic`, `pattern_file`, `point_rate`, `frame_rate`, `min_range`, `max_range`,
-`nominal_range`, `range_noise_stddev`, `default_reflectivity`, `seed`.
+`nominal_range`, `range_noise_stddev`, `near_range_noise_stddev`, `angular_noise_stddev_deg`,
+`default_reflectivity`, `seed`.
 
 ### Which ray-casting back-end, and why
 
@@ -304,8 +329,10 @@ publishes one frame of 20 000 pattern rays every 100 ms:
 * sampling uses **bilinear** interpolation in 1/r when the four neighbouring pixels lie on
   one continuous surface (spread ≤ 10 %), and **nearest neighbour** at depth edges and
   hit/miss borders, so no "ghost" points float between foreground and background;
-* the return model then applies the reflectivity-dependent detection range, the range noise
-  and `min_range`.
+* the angular noise picks the sampled direction, the incidence angle comes from the range
+  gradient of the render around the sampled cell (the smaller one-sided difference per axis,
+  so a depth edge doesn't read as grazing), and the return model then applies the detection
+  range, the range noise and `min_range`.
 
 **LaserScan layout (verified):** `ranges[v * count + h]`, with `h = 0` at `angle_min`
 (counter-clockwise) and `v = 0` at `vertical_angle_min`. The proof uses the ground plane:
@@ -352,7 +379,8 @@ truth computed with **one pose per frame** (at `timebase`):
 So at 50 Hz the cloud follows the true per-point pose to about 1 cm (the ±10 ms render
 granularity). Ignoring skew would be wrong by 13–34 cm. 10 Hz is effectively unskewed.
 
-Geometric accuracy (static, `range_noise:=0`, 10 frames, `eval_accuracy.py`):
+Geometric accuracy (static, `range_noise:=0`, 10 frames, `eval_accuracy.py`; measured before
+the realism model, which with `angular_noise:=0` leaves these numbers unchanged):
 
 | render | surface | bias | median \|e\| | p95 | p99 | > 20 cm |
 |---|---|---|---|---|---|---|
@@ -381,7 +409,7 @@ which it queries from gz. It finds the pattern block of each frame from the time
 compares all 20 000 rays per frame with ground truth:
 
 ```bash
-ros2 launch livox_mid360_gazebo sim.launch.py gui:=false rviz:=false range_noise:=0.0
+ros2 launch livox_mid360_gazebo sim.launch.py gui:=false rviz:=false range_noise:=0.0 angular_noise:=0.0
 ros2 run livox_mid360_gazebo eval_accuracy.py --frames 20
 ```
 
@@ -414,7 +442,7 @@ world, test rig (`rovers` branch), `range_noise:=0` for accuracy.
 | Timing / skew | each point from the render nearest its time (50 Hz → ±10 ms). Spinning at 1 rad/s: **~10 mm** median residual mid-frame (5–7 mm at 100 Hz, 130–150 mm at 10 Hz) | ray cast from the pose interpolated to its exact time: **0.00 mm** residual |
 | Geometry hit | **visual** (whatever ogre2 renders: meshes, heightmaps, everything) | **collision** by default, or visual (`geometry_source`). Box/sphere/cylinder/capsule/ellipsoid/plane/mesh; heightmaps, polylines and cones are skipped |
 | Range accuracy (static) | walls median 1.4 mm, p99 21 mm. Grazing ground (−5..−7°) median **51 mm**, p95 190 mm (depth cube-map quantization; `dense_h:=2880` halves it but RTF drops to 0.96). Edges: 2.3 % of object points > 20 cm off, 0.55 % missed and 0.33 % spurious returns | exact: 0.00 mm everywhere, 0 missed / 0 spurious (vs an independent analytic reference) |
-| Noise | σ = 2 cm along the ray (same model) | same |
+| Noise / returns | realism model (range + angular noise, incidence, soft detection limit); incidence from the render's range gradient | same model; incidence from the exact surface normal |
 | Rays/s | 200 k used, out of 11.5 M rendered | 200 k cast. **0.33 µs/ray** single-threaded; 2 M rays/s still faster than real time |
 | RTF (full launch) | 1.00 at 50 Hz, 0.92 at 100 Hz | 1.00 |
 | CPU (gz server, 100 % = 1 core) | 212–219 % | 119 % |
