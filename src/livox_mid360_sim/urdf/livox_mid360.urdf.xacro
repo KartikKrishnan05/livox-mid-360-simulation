@@ -7,6 +7,10 @@
 
   sensor:=raycast  exact CPU ray per pattern direction (approach 2, default, recommended)
   sensor:=gpu      dense gpu_lidar sampled along the pattern (approach 1; needs Sensors/ogre2)
+  sensor:=modes    approach 3, one plugin with lidar_mode:=snapshot|sliced|raycast
+                     snapshot  1 dense GPU image per frame
+                     sliced    ${slices} GPU images per frame, points stamped with their image's time
+                     raycast   CPU ray casting against the visual geometry, every ray at its own time
 
   Frames:  ${frame_id}_base  centre of the mounting face (child of parent at xyz/rpy)
            ${frame_id}       optical centre, 47 mm above the mounting face; points and IMU
@@ -22,7 +26,8 @@
             geometry_source:=collision
             dense_h_samples:=1440 dense_v_samples:=160
             pattern_file:=model://livox_mid360/scan_mode/mid360.csv
-            range_noise:=0.02 min_range:=0.1 max_range:=70.0 nominal_range:=40.0">
+            range_noise:=0.02 min_range:=0.1 max_range:=70.0 nominal_range:=40.0
+            lidar_mode:=sliced slices:=5">
 
     <link name="${frame_id}_base">
       <inertial>
@@ -63,6 +68,47 @@
     </gazebo>
 
     <gazebo reference="${frame_id}">
+      <xacro:if value="${sensor == 'modes'}">
+        <!-- Rendered frame_rate * slices Hz in sliced mode, frame_rate in snapshot mode. In
+             raycast mode it only marks the lidar origin; nothing subscribes, so Gazebo does
+             not render it (and it is throttled to 1 Hz in case it does). -->
+        <sensor name="${frame_id}_dense_lidar" type="gpu_lidar">
+          <pose>0 0 0 0 0 0</pose>
+          <topic>${dense_topic}</topic>
+          <update_rate>${frame_rate * int(slices) if lidar_mode == 'sliced' else (1 if lidar_mode == 'raycast' else frame_rate)}</update_rate>
+          <always_on>true</always_on>
+          <visualize>false</visualize>
+          <lidar>
+            <scan>
+              <horizontal>
+                <samples>${dense_h_samples}</samples>
+                <resolution>1</resolution>
+                <min_angle>${-pi}</min_angle>
+                <max_angle>${pi}</max_angle>
+              </horizontal>
+              <vertical>
+                <samples>${dense_v_samples}</samples>
+                <resolution>1</resolution>
+                <min_angle>${radians(-7.5)}</min_angle>
+                <max_angle>${radians(52.5)}</max_angle>
+              </vertical>
+            </scan>
+            <range>
+              <min>${min_range}</min>
+              <max>${max_range}</max>
+              <resolution>0.002</resolution>
+            </range>
+            <xacro:if value="${float(range_noise) > 0}">
+              <noise>
+                <type>gaussian</type>
+                <mean>0.0</mean>
+                <stddev>${range_noise}</stddev>
+              </noise>
+            </xacro:if>
+          </lidar>
+        </sensor>
+      </xacro:if>
+
       <xacro:if value="${sensor == 'gpu'}">
         <sensor name="${frame_id}_dense" type="gpu_lidar">
           <pose>0 0 0 0 0 0</pose>
@@ -114,6 +160,27 @@
       </sensor>
     </gazebo>
 
+    <xacro:if value="${sensor == 'modes'}">
+      <gazebo>
+        <plugin filename="livox_mid360_modes_system"
+                name="livox_mid360_sim::modes::LivoxMid360Modes">
+          <input_topic>${dense_topic}</input_topic>
+          <output_topic>${points_topic}</output_topic>
+          <frame_id>${frame_id}</frame_id>
+          <frame_rate>${frame_rate}</frame_rate>
+          <points_per_second>${point_rate}</points_per_second>
+          <min_range>${min_range}</min_range>
+          <max_range>${max_range}</max_range>
+          <pattern_file>${pattern_file}</pattern_file>
+          <mode>${lidar_mode}</mode>
+          <slices>${slices}</slices>
+          <sensor_name>${frame_id}_dense_lidar</sensor_name>
+          <range_noise>${range_noise}</range_noise>
+        </plugin>
+      </gazebo>
+    </xacro:if>
+
+    <xacro:unless value="${sensor == 'modes'}">
     <gazebo>
       <plugin filename="livox_mid360_sim_system"
               name="livox_mid360_sim::${'LivoxMid360Gpu' if sensor == 'gpu' else 'LivoxMid360Raycast'}">
@@ -131,5 +198,6 @@
         <range_noise_stddev>${range_noise}</range_noise_stddev>
       </plugin>
     </gazebo>
+    </xacro:unless>
   </xacro:macro>
 </robot>

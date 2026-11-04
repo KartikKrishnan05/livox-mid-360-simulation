@@ -49,7 +49,9 @@ Launch arguments:
 | `world` | `livox_test.sdf` | world file (absolute path or a name in `share/livox_mid360_sim/worlds`) |
 | `robot` | `test_rig` | `test_rig` (diff-drive rig, Mid-360 on a 0.45 m mast) or `scout_mini` (AgileX Scout Mini, Mid-360 on the deck) |
 | `mesh_collision` | `false` | `scout_mini`: original mesh collisions instead of fitted primitives (see below) |
-| `sensor` | `raycast` | `raycast` (exact CPU rays, approach 2) or `gpu` (dense GPU render, approach 1) |
+| `sensor` | `raycast` | `raycast` (exact CPU rays, approach 2), `gpu` (dense GPU render, approach 1) or `modes` (one plugin, three lidar modes, approach 3) |
+| `lidar_mode` | `sliced` | `modes`: `snapshot` (1 GPU image/frame), `sliced` (`slices` GPU images/frame) or `raycast` (CPU rays, visual geometry) |
+| `slices` | `5` | `modes`, `lidar_mode:=sliced`: GPU images per frame (gpu_lidar renders at 10 × `slices` Hz) |
 | `geometry_source` | `collision` | `raycast`: geometry the rays hit, `collision` or `visual` (test rig) |
 | `dense_rate` | `50` | `gpu`: render rate of the dense gpu_lidar (test rig) |
 | `dense_h`, `dense_v` | `1440`, `160` | `gpu`: dense gpu_lidar resolution (test rig) |
@@ -194,26 +196,61 @@ The `livox_ros_driver2` message definitions are copied from
 
 ## Choosing the sensor
 
-Both implementations are built into one plugin library and produce the same output contract,
-return model and IMU. Pick one at launch:
+All three implementations produce the same output contract (topics, frames, point layout,
+IMU in g). Approaches 1 and 2 share the plugin library `livox_mid360_sim_system`; approach 3
+is its own library, `livox_mid360_modes_system`. Pick one at launch:
 
 ```bash
-ros2 launch livox_mid360_sim sim.launch.py                  # sensor:=raycast (default)
-ros2 launch livox_mid360_sim sim.launch.py sensor:=gpu      # dense GPU render
+ros2 launch livox_mid360_sim sim.launch.py                                      # sensor:=raycast (default)
+ros2 launch livox_mid360_sim sim.launch.py sensor:=gpu                          # dense GPU render
+ros2 launch livox_mid360_sim sim.launch.py sensor:=modes                        # approach 3, sliced (5 slices)
+ros2 launch livox_mid360_sim sim.launch.py sensor:=modes lidar_mode:=snapshot
+ros2 launch livox_mid360_sim sim.launch.py sensor:=modes lidar_mode:=sliced slices:=10
+ros2 launch livox_mid360_sim sim.launch.py sensor:=modes lidar_mode:=raycast
 ```
 
 The launch file prints `Livox Mid-360 sensor: …`, and the plugin prints
-`[livox_mid360] sensor: …` when Gazebo loads it. If the two disagree, rebuild and re-source.
+`[livox_mid360] sensor: …` (approaches 1, 2) or `[LivoxMid360Modes] <mode> mode: …`
+(approach 3) when Gazebo loads it. If the two disagree, rebuild and re-source.
 
-| | `sensor:=raycast` (approach 2) | `sensor:=gpu` (approach 1) |
-|---|---|---|
-| SDF model | `model://livox_mid360` | `model://livox_mid360_gpu` (include it with `<name>livox_mid360</name>`) |
-| system plugin | `livox_mid360_sim::LivoxMid360Raycast` (alias `livox_mid360_sim::LivoxMid360`) | `livox_mid360_sim::LivoxMid360Gpu` |
-| xacro | `<xacro:livox_mid360 … sensor="raycast"/>` | `<xacro:livox_mid360 … sensor="gpu"/>` |
-| options | `geometry_source:=collision\|visual` | `dense_rate:=50`, `dense_h:=1440`, `dense_v:=160` |
-| world needs | `Imu` system | `Sensors` (ogre2) + `Imu` systems, a GPU |
+| | `sensor:=raycast` (approach 2) | `sensor:=gpu` (approach 1) | `sensor:=modes` (approach 3) |
+|---|---|---|---|
+| SDF model | `model://livox_mid360` | `model://livox_mid360_gpu` (include it with `<name>livox_mid360</name>`) | `model://livox_mid360_modes` (include it with `<name>livox_mid360</name>`; fixed to `sliced`, 5 slices) |
+| system plugin | `livox_mid360_sim::LivoxMid360Raycast` (alias `livox_mid360_sim::LivoxMid360`) | `livox_mid360_sim::LivoxMid360Gpu` | `livox_mid360_sim::modes::LivoxMid360Modes` |
+| xacro | `<xacro:livox_mid360 … sensor="raycast"/>` | `<xacro:livox_mid360 … sensor="gpu"/>` | `<xacro:livox_mid360 … sensor="modes" lidar_mode="sliced" slices="5"/>` |
+| options | `geometry_source:=collision\|visual` | `dense_rate:=50`, `dense_h:=1440`, `dense_v:=160` | `lidar_mode:=snapshot\|sliced\|raycast`, `slices:=5`, `dense_h`, `dense_v` |
+| world needs | `Imu` system | `Sensors` (ogre2) + `Imu` systems, a GPU | `Sensors` (ogre2) + `Imu` systems, a GPU (`raycast` mode: the gpu_lidar is declared but not rendered) |
 
 The old single-render `main` sensor is the same as `sensor:=gpu dense_rate:=10`.
+
+## Sensor `modes` (approach 3): one plugin, three lidar modes
+
+`sensor:=modes` loads `LivoxMid360Modes` (`src/modes/`, history on the branch
+`approach-3-three-modes`). It follows the same recorded scan pattern; `lidar_mode` picks how
+the ranges are measured:
+
+* **`snapshot`**: the gpu_lidar renders one dense image per frame (10 Hz) and every ray of the
+  frame reads it. Points are stamped across the frame, but all of them see the world at the
+  image time, so there is no motion skew.
+* **`sliced`** (default): the gpu_lidar renders `10 × slices` images per frame; each supplies
+  the next `1/slices` of the rays, stamped with its image time. Motion skews the cloud like on
+  the real sensor, in steps of `100/slices` ms (so `offset_time` takes `slices` values and
+  spans `100 (slices−1)/slices` ms; the checker accepts this).
+* **`raycast`**: no rendering. A CPU ray caster (binned-SAH BVH over the tessellated
+  **visual** geometry: box, sphere, cylinder, capsule, ellipsoid, cone, plane, mesh) fires the
+  rays due each physics step from that step's sensor pose, each stamped with its own time.
+
+Range samples from the dense image are bilinearly interpolated on continuous surfaces.
+`range_noise` sets the gpu_lidar noise (`snapshot`, `sliced`) or the per-ray noise (`raycast`).
+Its own `ScanPattern` and ray caster live in the namespace `livox_mid360_sim::modes`, separate
+from approach 2's.
+
+Measured headless on the test rig (same machine as below): all three modes pass
+`check_livox_cloud.py` at RTF 1.00, with the gz server at about 164 % CPU (`snapshot`),
+202 % (`sliced`, 5 slices) and 141 % (`raycast`). `slices:=10`, `robot:=scout_mini`,
+`spawn_robot:=false` and `xfer_format:=0` pass too. Spinning at 1 rad/s, de-skewing with the
+per-point times makes consecutive `sliced` / `raycast` frames align better and `snapshot`
+frames worse, as expected.
 
 ## Sensor `raycast` (approach 2, default): one exact ray per pattern direction
 
@@ -404,7 +441,9 @@ measures RTF, gz CPU% and GPU load per launch configuration.
    (same `livox_mid360::lidar_link`); the world then also needs the `Sensors` system (ogre2).
    The model origin (`lidar_link`) is the centre of the mounting face. In URDF, use the
    `urdf/livox_mid360.urdf.xacro` macro instead
-   (`<xacro:livox_mid360 parent="…" xyz="…" rpy="…" sensor="raycast|gpu"/>`).
+   (`<xacro:livox_mid360 parent="…" xyz="…" rpy="…" sensor="raycast|gpu|modes"/>`). Approach 3
+   is `model://livox_mid360_modes` (also with `<name>livox_mid360</name>`); its world needs
+   the `Sensors` system as well.
 3. Bridge `/livox/points` and `/livox/imu_raw` (see `config/bridge.yaml`) and run
    `livox_driver_emulator` (`xfer_format:=1`).
 4. FAST-LIO: `lidar_type: 1` (Livox), `lid_topic: /livox/lidar`, `imu_topic: /livox/imu`,
@@ -418,7 +457,8 @@ Both sensors pass `check_livox_cloud.py` headless in all three modes (default,
 `xfer_format:=0`, bare model on a pole), and run with the Gazebo GUI and RViz under
 `teleop_twist_keyboard`. Both produce the same output contract, return model and IMU.
 The development history of each is on the branches `approach-1-gpu-pattern` and
-`approach-2-exact-raycast`.
+`approach-2-exact-raycast`. Approach 3 (`sensor:=modes`) is described
+[above](#sensor-modes-approach-3-one-plugin-three-lidar-modes) and not part of this table.
 
 Measured on this machine: AMD Ryzen 5 2600 (6C/12T), GTX 1050 Ti 4 GB, Ubuntu 24.04, test
 world, test rig, `range_noise:=0` for accuracy.

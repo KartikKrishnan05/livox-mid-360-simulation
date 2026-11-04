@@ -1,10 +1,15 @@
 """Livox Mid-360 simulation: Gazebo + bridge + livox_driver_emulator (+ robot, RViz).
 
-ros2 launch livox_mid360_sim sim.launch.py [sensor:=raycast|gpu] [robot:=test_rig|scout_mini]
+ros2 launch livox_mid360_sim sim.launch.py [sensor:=raycast|gpu|modes] [robot:=test_rig|scout_mini]
+    [lidar_mode:=snapshot|sliced|raycast] [slices:=5]
     [gui:=true] [rviz:=true] [spawn_robot:=true] [xfer_format:=1] [world:=<path or name in share/livox_mid360_sim/worlds>]
 
 sensor:=raycast  exact CPU ray per pattern direction (approach 2, default, recommended)
 sensor:=gpu      dense gpu_lidar rendered at dense_rate Hz, sampled along the pattern (approach 1)
+sensor:=modes    one plugin, three lidar modes (approach 3), chosen with lidar_mode:=
+                   snapshot  1 dense GPU image per frame
+                   sliced    `slices` GPU images per frame, each stamped with its image time
+                   raycast   CPU ray casting against the visual geometry, per-ray timing
 """
 import os
 
@@ -23,7 +28,10 @@ SENSORS = {
                 'model://livox_mid360'),
     'gpu': ('gpu (approach 1) - dense GPU render, nearest-render sampling',
             'model://livox_mid360_gpu'),
+    'modes': ('modes (approach 3) - one plugin with snapshot / sliced / raycast lidar modes',
+              'model://livox_mid360_modes'),
 }
+LIDAR_MODES = ('snapshot', 'sliced', 'raycast')
 
 # Robots (launch argument "robot"): xacro file, spawn height of base_link [m].
 ROBOTS = {
@@ -75,9 +83,23 @@ def _setup(context):
     robot_xacro, spawn_z = ROBOTS[robot]
 
     gz_args = f'-r {world}' if gui else f'-r -s --headless-rendering {world}'
+    lidar_mode = context.launch_configurations['lidar_mode'].strip().lower()
+    slices = context.launch_configurations['slices'].strip()
+    if sensor == 'modes':
+        if lidar_mode not in LIDAR_MODES:
+            raise RuntimeError(f"lidar_mode:={lidar_mode} is not one of {', '.join(LIDAR_MODES)}")
+        if not slices.isdigit() or int(slices) < 1:
+            raise RuntimeError(f'slices:={slices} must be a positive integer')
     extra = ''
     if sensor == 'gpu':
         extra = f" at {dense_rate} Hz" if spawn_robot else ' at 50 Hz (model.sdf)'
+    elif sensor == 'modes':
+        if not spawn_robot:
+            extra = ', lidar_mode sliced, 5 slices (model.sdf; lidar_mode/slices need spawn_robot)'
+        elif lidar_mode == 'sliced':
+            extra = f', lidar_mode sliced, {slices} slices'
+        else:
+            extra = f', lidar_mode {lidar_mode}'
     actions = [
         LogInfo(msg=f'Livox Mid-360 sensor: {description}{extra}'),
         IncludeLaunchDescription(
@@ -108,7 +130,9 @@ def _setup(context):
                          if robot == 'scout_mini' else {}),
                       'range_noise': context.launch_configurations['range_noise'],
                       'dense_h': context.launch_configurations['dense_h'],
-                      'dense_v': context.launch_configurations['dense_v']}).toxml()
+                      'dense_v': context.launch_configurations['dense_v'],
+                      'lidar_mode': lidar_mode,
+                      'slices': slices}).toxml()
         actions += [
             Node(package='robot_state_publisher', executable='robot_state_publisher',
                  parameters=[{'robot_description': robot_description, 'use_sim_time': True}],
@@ -140,7 +164,13 @@ def generate_launch_description():
     return LaunchDescription([
         DeclareLaunchArgument('sensor', default_value='raycast',
                               description='raycast (exact CPU rays, approach 2) | '
-                                          'gpu (dense GPU render, approach 1)'),
+                                          'gpu (dense GPU render, approach 1) | '
+                                          'modes (approach 3, see lidar_mode)'),
+        DeclareLaunchArgument('lidar_mode', default_value='sliced',
+                              description='modes: snapshot (1 GPU image/frame) | sliced '
+                                          '(`slices` GPU images/frame) | raycast (CPU rays)'),
+        DeclareLaunchArgument('slices', default_value='5',
+                              description='modes, lidar_mode:=sliced: GPU images per frame'),
         DeclareLaunchArgument('robot', default_value='test_rig',
                               description='test_rig (Mid-360 on a 0.45 m mast) | '
                                           'scout_mini (AgileX Scout Mini, Mid-360 on the deck)'),
