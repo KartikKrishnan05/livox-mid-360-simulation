@@ -27,8 +27,10 @@ single plugin library and no duplicate ray caster or scan-pattern loader to main
 
 ## Where the code is
 
-* Branch `approach-3-three-modes` (commit `9906e28`): the standalone version, with its own
-  launch file, checker and pixi setup.
+* Commit `9906e28` (the former branch `approach-3-three-modes`, since deleted; the commit
+  stays in `main`'s history as the second parent of `f676431`): the standalone version, with
+  its own launch file, checker and pixi setup. `git checkout -b approach-3 9906e28` brings
+  the branch back.
 * Merge commit `f676431` on `main`: the version integrated as `sensor:=modes` (plugin in
   `src/livox_mid360_sim/src/modes/`, namespace `livox_mid360_sim::modes`,
   `model://livox_mid360_modes`). To look at it: `git show f676431 --stat`, or
