@@ -39,7 +39,8 @@ sudo apt install ros-jazzy-desktop ros-jazzy-ros-gz ros-jazzy-xacro \
 ## Build
 
 ```bash
-cd livox-mid-360-simulation
+git clone https://github.com/KartikKrishnan05/livox_mid360_gazebo.git
+cd livox_mid360_gazebo
 source /opt/ros/jazzy/setup.bash
 colcon build --cmake-args -DCMAKE_BUILD_TYPE=Release
 source install/setup.bash     # also sets GZ_SIM_SYSTEM_PLUGIN_PATH / GZ_SIM_RESOURCE_PATH
