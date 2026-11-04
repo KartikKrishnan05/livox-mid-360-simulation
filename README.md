@@ -5,10 +5,20 @@ A Livox Mid-360 lidar + IMU for gz-sim 8 whose ROS output matches what
 non-repetitive Mid-360 scan pattern, gives every point its own timestamp and laser
 line, and reports IMU acceleration in g.
 
+Two sensor implementations, switchable at launch with `sensor:=`:
+
+* **`raycast`** (default): exact CPU ray casting, one ray per scan-pattern direction, each
+  from the sensor pose at its own firing time. Gazebo Harmonic only ships a GPU lidar
+  (`gpu_lidar`), so existing Mid-360 simulations sample rendered depth images; this sensor
+  needs no GPU or rendering and is exact in geometry and in motion skew.
+* **`gpu`**: the depth-image approach, a dense `gpu_lidar` render sampled along the scan
+  pattern, for worlds whose geometry is only rendered (e.g. heightmaps).
+
 ```
 src/
   livox_ros_driver2/   messages only (CustomMsg, CustomPoint), identical to upstream
   livox_mid360_sim/    gz-sim system plugin, model, xacro, world, launch, emulator, checks
+docs/                  notes on approaches that were tried and dropped
 ```
 
 ## Install (Ubuntu 24.04)
@@ -213,7 +223,8 @@ The launch file prints `Livox Mid-360 sensor: …`, and the plugin prints
 | options | `geometry_source:=collision\|visual` | `dense_rate:=50`, `dense_h:=1440`, `dense_v:=160` |
 | world needs | `Imu` system | `Sensors` (ogre2) + `Imu` systems, a GPU |
 
-The old single-render `main` sensor is the same as `sensor:=gpu dense_rate:=10`.
+One depth image per frame, as in the existing GPU-based Mid-360 simulations, is
+`sensor:=gpu dense_rate:=10`.
 
 ## Sensor `raycast` (approach 2, default): one exact ray per pattern direction
 
