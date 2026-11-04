@@ -223,7 +223,7 @@ def evaluate(node, args):
     rep.add('reflectivity 0..255', refl.min() >= 0 and refl.max() <= 255,
             f'{refl.min()} .. {refl.max()}')
 
-    off_ok, span_min, mono, steps = True, 1e9, True, 0
+    off_ok, span_min, mono = True, 1e9, True
     for f in fr:
         off = f.t_abs - f.timebase
         if len(off) == 0:
@@ -231,16 +231,9 @@ def evaluate(node, args):
         off_ok &= off.min() >= 0 and off.max() <= 100_000_000
         span_min = min(span_min, (off.max() - off.min()) * 1e-6)
         mono &= bool((np.diff(off) >= 0).all())
-        steps = max(steps, len(np.unique(off)))
-    # sensor:=modes lidar_mode:=sliced stamps each of its N slices with one time, so the
-    # offsets are 0, 100/N, ... ms and span 100 (N-1)/N ms; every other variant stamps
-    # each point on its own.
-    sliced = 1 < steps <= 100
-    need = 100.0 * (steps - 1) / steps - 10.0 if sliced else 90.0
-    rep.add(f'offset_time in 0..100 ms, span > {need:.0f} ms, non-decreasing',
-            off_ok and span_min > need and mono,
-            f'in range: {off_ok}, min span {span_min:.2f} ms, non-decreasing: {mono}'
-            + (f', {steps} time steps (sliced)' if sliced else ''))
+    rep.add('offset_time in 0..100 ms, span > 90 ms, non-decreasing',
+            off_ok and span_min > 90.0 and mono,
+            f'in range: {off_ok}, min span {span_min:.2f} ms, non-decreasing: {mono}')
 
     if len(fr) >= 6:
         c1 = cells(fr[1])
