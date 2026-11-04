@@ -1,0 +1,77 @@
+<?xml version="1.0"?>
+<!--
+  Livox Mid-360 (lidar + built-in IMU) for gz-sim 8.
+
+  * Model origin / lidar_link origin = centre of the mounting face (bottom of the housing).
+  * livox_frame (optical centre) is 47 mm above it; all sensors are posed relative to it.
+  * IMU at (0.011, 0.02329, -0.04412) m in livox_frame (FAST-LIO extrinsic_T = -that).
+
+  Sensor: exact CPU ray casting (approach 2, recommended). The same sensor with a dense GPU
+  render instead (approach 1) is model://livox_mid360_gpu.
+
+  Include it with <include><uri>model://livox_mid360</uri></include> and attach a joint to
+  livox_mid360::lidar_link. Topics (gz side): /livox/points, /livox/imu_raw.
+-->
+<sdf version="1.9">
+  <model name="livox_mid360">
+    <link name="lidar_link">
+      <inertial>
+        <pose>0 0 0.03 0 0 0</pose>
+        <mass>0.265</mass>
+        <inertia>
+          <ixx>1.73e-4</ixx><iyy>1.73e-4</iyy><izz>1.40e-4</izz>
+          <ixy>0</ixy><ixz>0</ixz><iyz>0</iyz>
+        </inertia>
+      </inertial>
+      <collision name="housing_collision">
+        <pose>0 0 0.03 0 0 0</pose>
+        <geometry><cylinder><radius>0.0325</radius><length>0.06</length></cylinder></geometry>
+      </collision>
+      <visual name="housing_visual">
+        <pose>0 0 0.03 0 0 0</pose>
+        <geometry><cylinder><radius>0.0325</radius><length>0.06</length></cylinder></geometry>
+        <material>
+          <ambient>0.1 0.1 0.1 1</ambient><diffuse>0.15 0.15 0.15 1</diffuse>
+          <specular>0.3 0.3 0.3 1</specular>
+        </material>
+      </visual>
+
+      <!-- Built-in IMU (ICM40609-class noise). 0.047 - 0.04412 = 0.00288 -->
+      <sensor name="livox_imu" type="imu">
+        <pose>0.011 0.02329 0.00288 0 0 0</pose>
+        <topic>/livox/imu_raw</topic>
+        <update_rate>200</update_rate>
+        <always_on>true</always_on>
+        <imu>
+          <angular_velocity>
+            <x><noise type="gaussian"><mean>0</mean><stddev>6.6e-4</stddev></noise></x>
+            <y><noise type="gaussian"><mean>0</mean><stddev>6.6e-4</stddev></noise></y>
+            <z><noise type="gaussian"><mean>0</mean><stddev>6.6e-4</stddev></noise></z>
+          </angular_velocity>
+          <linear_acceleration>
+            <x><noise type="gaussian"><mean>0</mean><stddev>0.01</stddev></noise></x>
+            <y><noise type="gaussian"><mean>0</mean><stddev>0.01</stddev></noise></y>
+            <z><noise type="gaussian"><mean>0</mean><stddev>0.01</stddev></noise></z>
+          </linear_acceleration>
+        </imu>
+      </sensor>
+    </link>
+
+    <plugin filename="livox_mid360_gazebo_system" name="livox_mid360_gazebo::LivoxMid360Raycast">
+      <link_name>lidar_link</link_name>
+      <!-- livox_frame (optical centre) relative to lidar_link -->
+      <frame_offset>0 0 0.047 0 0 0</frame_offset>
+      <frame_id>livox_frame</frame_id>
+      <!-- collision (default) or visual -->
+      <geometry_source>collision</geometry_source>
+      <points_topic>/livox/points</points_topic>
+      <pattern_file>model://livox_mid360/scan_mode/mid360.csv</pattern_file>
+      <point_rate>200000</point_rate>
+      <frame_rate>10</frame_rate>
+      <min_range>0.1</min_range>
+      <max_range>70.0</max_range>
+      <nominal_range>40.0</nominal_range>
+      <range_noise_stddev>0.02</range_noise_stddev>
+    </plugin>
+  </model>
+</sdf>
