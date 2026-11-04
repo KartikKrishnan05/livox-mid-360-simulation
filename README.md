@@ -21,6 +21,11 @@ src/
 docs/                  notes on approaches that were tried and dropped
 ```
 
+**This is the `rovers` branch:** the sensor on two robots (a diff-drive test rig and the
+AgileX Scout Mini) with teleop, odometry and ground-truth pose, used for the moving-sensor
+measurements below. `main` has the sensor only, as a plugin to add to your own robot or
+world, plus a static test stand.
+
 ## Install (Ubuntu 24.04)
 
 ```bash
