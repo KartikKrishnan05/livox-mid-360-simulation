@@ -14,10 +14,10 @@ Run against a *static* sensor, ideally with range_noise:=0.0, e.g.
   ros2 launch livox_mid360_sim sim.launch.py gui:=false rviz:=false range_noise:=0.0
   ros2 run livox_mid360_sim eval_accuracy.py --frames 20
 
-Motion skew (--moving): with the test rig moving (e.g. spinning in place), the truth for
-each ray is computed from the sensor pose *at that ray's timestamp* (ground-truth pose from
-gz, /ground_truth/pose, interpolated) and, for contrast, from one pose for the whole frame
-(at timebase). Wheel odometry is not used: it drifts (slip) when spinning in place.
+Motion skew (--moving): with the sensor's model moving (e.g. a robot spinning in place;
+the rovers branch has one), the truth for each ray is computed from the sensor pose *at
+that ray's timestamp* (ground-truth pose from gz, /ground_truth/pose, interpolated) and,
+for contrast, from one pose for the whole frame (at timebase). Wheel odometry is not used: it drifts (slip) when spinning in place.
 A sensor that models skew matches the per-ray truth; one that doesn't matches the
 single-pose truth.
 """
@@ -242,7 +242,7 @@ def load_pattern(path):
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument('--frames', type=int, default=20)
-    ap.add_argument('--model', default='test_rig')
+    ap.add_argument('--model', default='livox_stand')
     ap.add_argument('--link', default='livox_frame')
     ap.add_argument('--offset-z', type=float, default=0.0,
                     help='livox_frame above --link (0.047 for lidar_link)')
@@ -253,7 +253,8 @@ def main():
                     help='truth hits beyond this are not counted as missed')
     ap.add_argument('--timeout', type=float, default=60.0)
     ap.add_argument('--moving', action='store_true',
-                    help='moving rig: per-ray sensor pose from /ground_truth/pose')
+                    help='moving model: per-ray sensor pose from /ground_truth/pose (bridged gz '
+                         '/model/<name>/pose, e.g. from a PosePublisher; see the rovers branch)')
     import rclpy
     from geometry_msgs.msg import PoseStamped
     from rclpy.qos import QoSProfile

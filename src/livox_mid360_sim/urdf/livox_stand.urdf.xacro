@@ -1,0 +1,52 @@
+<?xml version="1.0"?>
+<!--
+  Static test stand: a 0.5 m pole fixed to the world with a Livox Mid-360 on top, built
+  with the livox_mid360 macro exactly as on a robot. The mounting face is at z = 0.5 m, so
+  livox_frame (optical centre) is at z = 0.547 m.
+
+  To put the sensor on your own robot, include the macro the same way:
+    <xacro:include filename="$(find livox_mid360_sim)/urdf/livox_mid360.urdf.xacro"/>
+    <xacro:livox_mid360 parent="base_link" xyz="0 0 0.3" rpy="0 0 0" sensor="raycast"/>
+-->
+<robot name="livox_stand" xmlns:xacro="http://www.ros.org/wiki/xacro">
+  <xacro:arg name="sensor" default="raycast"/>
+  <xacro:arg name="geometry_source" default="collision"/>
+  <xacro:arg name="pattern_file" default="model://livox_mid360/scan_mode/mid360.csv"/>
+  <xacro:arg name="dense_rate" default="50"/>
+  <xacro:arg name="range_noise" default="0.02"/>
+  <xacro:arg name="dense_h" default="1440"/>
+  <xacro:arg name="dense_v" default="160"/>
+
+  <xacro:include filename="$(find livox_mid360_sim)/urdf/livox_mid360.urdf.xacro"/>
+
+  <xacro:property name="pole_len" value="0.5"/>
+
+  <link name="world"/>
+  <joint name="pole_to_world" type="fixed">
+    <parent link="world"/>
+    <child link="pole"/>
+  </joint>
+
+  <link name="pole">
+    <inertial>
+      <origin xyz="0 0 ${pole_len / 2}"/>
+      <mass value="1.0"/>
+      <inertia ixx="0.02" iyy="0.02" izz="0.0002" ixy="0" ixz="0" iyz="0"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 ${pole_len / 2}"/>
+      <geometry><cylinder radius="0.02" length="${pole_len}"/></geometry>
+      <material name="stand_grey"><color rgba="0.6 0.6 0.6 1"/></material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 ${pole_len / 2}"/>
+      <geometry><cylinder radius="0.02" length="${pole_len}"/></geometry>
+    </collision>
+  </link>
+
+  <xacro:livox_mid360 parent="pole" xyz="0 0 ${pole_len}" rpy="0 0 0" sensor="$(arg sensor)"
+                      geometry_source="$(arg geometry_source)"
+                      pattern_file="$(arg pattern_file)" dense_rate="$(arg dense_rate)"
+                      range_noise="$(arg range_noise)"
+                      dense_h_samples="$(arg dense_h)" dense_v_samples="$(arg dense_v)"/>
+</robot>

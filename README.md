@@ -1,7 +1,7 @@
 # Livox Mid-360 simulation (ROS 2 Jazzy + Gazebo Harmonic)
 
-A Livox Mid-360 lidar + IMU for gz-sim 8 whose ROS output matches what
-`livox_ros_driver2` publishes on a real Mid-360. It uses the recorded,
+A Livox Mid-360 lidar + IMU plugin for gz-sim 8 (Gazebo Harmonic) that you add to your own
+robot or world. Its ROS output matches what `livox_ros_driver2` publishes on a real Mid-360. It uses the recorded,
 non-repetitive Mid-360 scan pattern, gives every point its own timestamp and laser
 line, and reports IMU acceleration in g.
 
@@ -17,15 +17,19 @@ Two sensor implementations, switchable at launch with `sensor:=`:
 ```
 src/
   livox_ros_driver2/   messages only (CustomMsg, CustomPoint), identical to upstream
-  livox_mid360_sim/    gz-sim system plugin, model, xacro, world, launch, emulator, checks
+  livox_mid360_sim/    gz-sim system plugin, SDF models, xacro macro, emulator, test stand, checks
 docs/                  notes on approaches that were tried and dropped
 ```
+
+This branch is the sensor only. The branch **`rovers`** has the same sensor on two robots
+(a diff-drive test rig and the AgileX Scout Mini) with teleop, odometry and ground-truth pose;
+the moving-sensor measurements below were made there.
 
 ## Install (Ubuntu 24.04)
 
 ```bash
 sudo apt install ros-jazzy-desktop ros-jazzy-ros-gz ros-jazzy-xacro \
-  ros-jazzy-robot-state-publisher ros-jazzy-teleop-twist-keyboard \
+  ros-jazzy-robot-state-publisher \
   python3-colcon-common-extensions
 ```
 
@@ -41,78 +45,70 @@ colcon build --cmake-args -DCMAKE_BUILD_TYPE=Release
 source install/setup.bash     # also sets GZ_SIM_SYSTEM_PLUGIN_PATH / GZ_SIM_RESOURCE_PATH
 ```
 
-## Run
+## Adding the sensor to your robot or world
+
+The plugin, the SDF models and the xacro macro are installed with the package; sourcing
+`install/setup.bash` puts them on `GZ_SIM_SYSTEM_PLUGIN_PATH` / `GZ_SIM_RESOURCE_PATH`.
+
+1. Put `src/livox_mid360_sim` in your workspace. If the workspace already has the real
+   `livox_ros_driver2`, **don't copy `src/livox_ros_driver2`**: two packages with one name
+   break the build, and the message definitions are identical (same type hashes), so the
+   real driver is a drop-in.
+2. Add the sensor, either in **URDF/xacro**:
+   ```xml
+   <xacro:include filename="$(find livox_mid360_sim)/urdf/livox_mid360.urdf.xacro"/>
+   <xacro:livox_mid360 parent="base_link" xyz="0 0 0.3" rpy="0 0 0" sensor="raycast"/>
+   ```
+   (`sensor="gpu"` for the GPU variant; the macro's other parameters are listed at the top of
+   `urdf/livox_mid360.urdf.xacro`), or in **SDF**:
+   ```xml
+   <include><uri>model://livox_mid360</uri><name>livox_mid360</name><pose>…</pose></include>
+   <joint name="livox_mount" type="fixed">
+     <parent>…your link…</parent><child>livox_mid360::lidar_link</child>
+   </joint>
+   ```
+   (`model://livox_mid360_gpu` for the GPU variant, same `<name>` and link). The model origin
+   (`lidar_link`) is the centre of the mounting face; `livox_frame` is 47 mm above it.
+   `urdf/livox_stand.urdf.xacro` is a complete minimal example.
+3. The world needs the `Imu` system; with `sensor="gpu"` also the `Sensors` system (ogre2)
+   and a GPU. See `worlds/livox_test.sdf`.
+4. Bridge `/clock`, `/livox/points` and `/livox/imu_raw` (`config/bridge.yaml`) and run
+   `livox_driver_emulator` (`xfer_format:=1`), as `launch/sim.launch.py` does. That gives
+   `/livox/lidar` and `/livox/imu` exactly like the real driver.
+5. FAST-LIO: `lidar_type: 1` (Livox), `lid_topic: /livox/lidar`, `imu_topic: /livox/imu`,
+   `extrinsic_T: [-0.011, -0.02329, 0.04412]`, `extrinsic_R: identity`. No
+   `pointcloud2_to_livox` adapter is needed: `/livox/lidar` is already a CustomMsg with real
+   per-point times and lines.
+
+## Run the test stand
 
 ```bash
-ros2 launch livox_mid360_sim sim.launch.py                 # Gazebo GUI + RViz + test rig
-ros2 run teleop_twist_keyboard teleop_twist_keyboard       # drive it (second terminal)
+ros2 launch livox_mid360_sim sim.launch.py                       # Gazebo GUI + RViz, sensor on a 0.5 m pole
+ros2 launch livox_mid360_sim sim.launch.py sensor:=gpu
+ros2 launch livox_mid360_sim sim.launch.py description:=sdf      # same, via the SDF model include
 ```
 
-Launch arguments:
+The stand puts `livox_frame` at z = 0.547 m in `worlds/livox_test.sdf`. Launch arguments:
 
 | arg | default | |
 |---|---|---|
+| `sensor` | `raycast` | `raycast` (exact CPU rays, approach 2) or `gpu` (dense GPU render, approach 1) |
+| `description` | `xacro` | `xacro`: the `livox_mid360` macro on a pole (`urdf/livox_stand.urdf.xacro`, all options below apply). `sdf`: `model://livox_mid360[_gpu]` included on a pole and jointed to `livox_mid360::lidar_link` (the model's fixed defaults apply) |
 | `gui` | `true` | Gazebo GUI (`false` = headless server with EGL rendering) |
-| `rviz` | `true` | RViz with `config/livox.rviz` |
-| `spawn_robot` | `true` | `true`: diff-drive test rig (Mid-360 on a 0.45 m mast). `false`: the bare `model://livox_mid360` on a pole, jointed to `livox_mid360::lidar_link`, which is the ignc-kit integration path |
+| `rviz` | `true` | RViz with `config/livox.rviz` (fixed frame `world`) |
 | `xfer_format` | `1` | `1` = CustomMsg, `0` = PointCloud2 (driver layout) on `/livox/lidar` |
 | `world` | `livox_test.sdf` | world file (absolute path or a name in `share/livox_mid360_sim/worlds`) |
-| `robot` | `test_rig` | `test_rig` (diff-drive rig, Mid-360 on a 0.45 m mast) or `scout_mini` (AgileX Scout Mini, Mid-360 on the deck) |
-| `mesh_collision` | `false` | `scout_mini`: original mesh collisions instead of fitted primitives (see below) |
-| `sensor` | `raycast` | `raycast` (exact CPU rays, approach 2) or `gpu` (dense GPU render, approach 1) |
-| `geometry_source` | `collision` | `raycast`: geometry the rays hit, `collision` or `visual` (test rig) |
-| `dense_rate` | `50` | `gpu`: render rate of the dense gpu_lidar (test rig) |
-| `dense_h`, `dense_v` | `1440`, `160` | `gpu`: dense gpu_lidar resolution (test rig) |
-| `range_noise` | `0.02` | range noise σ [m] (test rig; `0` for accuracy tests) |
-
-## Robots
-
-```bash
-ros2 launch livox_mid360_sim sim.launch.py robot:=scout_mini                # Scout Mini
-ros2 launch livox_mid360_sim sim.launch.py robot:=scout_mini sensor:=gpu
-```
-
-**`scout_mini`** (`urdf/scout_mini.urdf.xacro`) is the AgileX Scout Mini from ignc-kit's
-`gazebo_sim` package. It has the same links, joints, masses, DiffDrive (4 wheels, separation
-0.49 m, radius 0.08 m), joint-state and odometry plugins (`/cmd_vel`, `/odom`, `/tf`
-odom→base_link, `/joint_states`), and the same meshes (`models/scout_mini`, Apache-2.0). The
-Mid-360 is centred on a 10 × 10 cm, 8 mm mounting plate on the top deck. The deck has an open
-recess in the middle, which the plate spans.
-
-| frame | height above `base_link` | above ground |
-|---|---|---|
-| `base_link` | 0 | 0.180 m (wheel centres −0.10, radius 0.08) |
-| deck / plate top (= Mid-360 mounting face) | 0.057 / 0.065 m | |
-| `livox_frame` (optical centre) | 0.112 m | **0.292 m** |
-
-At −7° the lowest rays clear the deck edges, so the robot doesn't occlude itself. Changes
-from the ignc-kit original:
-
-* **Collisions are primitives fitted to the meshes:** a box for the body, cylinders of
-  r = 0.08 m and width 0.074 m for the wheel treads. The visuals stay meshes. With the
-  original mesh collisions (`mesh_collision:=true`), RTF drops to about 0.9 because of the
-  106k-vertex body mesh.
-* **The spawn height is 0.180 m**, i.e. resting height. ignc-kit spawns at 0.25 m. A drop
-  of even 2 cm onto the 132 kg body shakes the IMU at several g for about 0.5 s, which
-  would spoil FAST-LIO's IMU initialisation. At rest the IMU then shows only its configured
-  noise (|a| std 0.006 g).
-* Odometry frame names are set explicitly (`odom`, `base_link`), and a PosePublisher feeds
-  `/ground_truth/pose`.
-
-Checks on the Scout: `SMOKE_GROUND_Z=-0.292 ros2 run livox_mid360_sim smoke_test.sh
-robot:=scout_mini [sensor:=gpu]` passes with both sensors at RTF 1.0. The ground points land
-at −0.292 m. For accuracy and skew, use `eval_accuracy.py --model scout_mini`.
-
-The meshes are resolved as `package://livox_mid360_sim/models/scout_mini/meshes/…`. Gazebo
-finds them because the package's env hook also adds `share/` to `GZ_SIM_RESOURCE_PATH`.
+| `geometry_source` | `collision` | `raycast`: geometry the rays hit, `collision` or `visual` |
+| `dense_rate` | `50` | `gpu`: render rate of the dense gpu_lidar |
+| `dense_h`, `dense_v` | `1440`, `160` | `gpu`: dense gpu_lidar resolution |
+| `range_noise` | `0.02` | range noise σ [m] (`0` for accuracy tests) |
 
 ## Check
 
 ```bash
 ros2 run livox_mid360_sim smoke_test.sh                    # headless: launch, check, report, tear down
-ros2 run livox_mid360_sim smoke_test.sh xfer_format:=0
-SMOKE_GROUND_Z=-0.547 ros2 run livox_mid360_sim smoke_test.sh spawn_robot:=false
-ros2 run livox_mid360_sim check_livox_cloud.py --ground-z -0.722   # against a running sim
+ros2 run livox_mid360_sim smoke_test.sh sensor:=gpu description:=sdf xfer_format:=0
+ros2 run livox_mid360_sim check_livox_cloud.py --ground-z -0.547   # against a running sim
 ```
 
 `check_livox_cloud.py` exits non-zero on failure. It checks:
@@ -141,7 +137,8 @@ ros2 run livox_mid360_sim check_livox_cloud.py --ground-z -0.722   # against a r
 | `/livox/imu` | `sensor_msgs/msg/Imu` | 200 Hz, angular velocity in rad/s, **linear acceleration in g**, frame `livox_frame`, no orientation |
 | `/livox/points` | `sensor_msgs/msg/PointCloud2` | internal: gz output (26-byte Livox layout), bridged |
 | `/livox/imu_raw` | `sensor_msgs/msg/Imu` | internal: gz IMU in m/s², bridged |
-| `/cmd_vel`, `/odom`, `/tf`, `/joint_states`, `/clock` | | test rig and sim time |
+| `/clock` | `rosgraph_msgs/msg/Clock` | sim time |
+| `/tf_static` | | `world` → … → `livox_frame` (test stand) |
 
 Per-point contract, matching `livox_ros_driver2` on a Mid-360:
 
@@ -246,7 +243,7 @@ One depth image per frame, as in the existing GPU-based Mid-360 simulations, is
   later) are picked up automatically. Heightmaps, polylines and cones are skipped with a
   warning.
 * Rays start at `min_range` from the optical centre, like gz lidars, so the housing is never
-  seen from inside. The robot's own body is visible, as on a real robot.
+  seen from inside. The body of the robot carrying it is visible, as on a real robot.
 * The output contract, return model (detection range, noise, reflectivity) and IMU are
   identical to approach 1.
 
@@ -271,7 +268,7 @@ Plugin parameters (`model.sdf`): `link_name` (`lidar_link`), `frame_offset`
   unlimited speed, the world runs 20 s of sim time in 3.6 s without the lidar, 7.7 s with
   it at 200 k rays/s, and 17.7 s at **2 M rays/s**. That is 10× the Mid-360 rate and still
   faster than real time, single-threaded.
-* **Full launch** (`benchmark.sh`, test rig): **RTF 1.00, gz server 119 % CPU, no GPU
+* **Full launch** (`benchmark.sh`, test rig on the `rovers` branch): **RTF 1.00, gz server 119 % CPU, no GPU
   memory** beyond the desktop's. `sensor:=gpu` at 50 Hz: RTF 1.00, 212–219 % CPU, about
   170 MiB GPU.
 * **Accuracy** (`eval_accuracy.py`, `range_noise:=0`): static, 10 frames, 78 594 points:
@@ -280,7 +277,7 @@ Plugin parameters (`model.sdf`): `link_name` (`lidar_link`), `frame_offset`
   ray caster over the same SDF, so this shows the gz side (poses, collision extraction,
   mesh loading, interpolation) adds no error. It is not an independent physical
   measurement.
-* **Motion skew** (rig spinning at 1 rad/s, truth from the 1 kHz ground-truth pose at each
+* **Motion skew** (test rig on the `rovers` branch spinning at 1 rad/s, truth from the 1 kHz ground-truth pose at each
   ray's time): **0.00 mm** median and no missed or spurious returns in every quarter of the
   frame. Truth with one pose per frame is off by 9 / 134 / 197 / 324 mm per quarter, so the
   skew is fully present and exactly where it should be.
@@ -311,9 +308,8 @@ publishes one frame of 20 000 pattern rays every 100 ms:
 
 **LaserScan layout (verified):** `ranges[v * count + h]`, with `h = 0` at `angle_min`
 (counter-clockwise) and `v = 0` at `vertical_angle_min`. The proof uses the ground plane:
-with this indexing, points below −5.5° land at median z = −0.546 m for a sensor at 0.547 m
-(bare model on its pole) and at −0.716 m for the test rig, whose sensor gz reports at exactly
-0.722 m. A flipped `v` would put those points high above the sensor (the `ground` check in
+with this indexing, points below −5.5° land at median z = −0.546 m for the sensor on the
+test stand at 0.547 m. A flipped `v` would put those points high above the sensor (the `ground` check in
 `check_livox_cloud.py`). The residual few mm come from depth-render quantization at grazing
 incidence (see below).
 
@@ -324,7 +320,7 @@ see walls.
 
 ### Measured on this machine (`sensor:=gpu`) (AMD Ryzen 5 2600 Six-Core Processor, GTX 1050 Ti 4 GB, headless EGL)
 
-Performance (`benchmark.sh`, test world, rig standing still). CPU% is the gz server process
+Performance (`benchmark.sh`, test world, test rig standing still, `rovers` branch). CPU% is the gz server process
 (100 % = one core). GPU memory is the whole GPU, including about 300 MiB used by the desktop.
 
 | dense render | rate | RTF | gz CPU | GPU util | GPU mem |
@@ -340,7 +336,7 @@ The sensor publishes 200 k rays/s. The GPU renders 11.5 M (1440 × 160 × 50) ra
 The limit is the CPU side of the render pipeline: sensor update, GPU→CPU readback, and the
 large `LaserScan` message. The GPU itself is not saturated.
 
-Motion skew. The rig spins in place at 1 rad/s (ground truth ≈ 1.1 rad/s) with
+Motion skew (`rovers` branch). The test rig spins in place at 1 rad/s (ground truth ≈ 1.1 rad/s) with
 `range_noise:=0`. The table gives the median |range error| on walls and vertical objects
 against analytic truth computed with the sensor pose **at each ray's own time**, against
 truth computed with **one pose per frame** (at `timebase`):
@@ -391,50 +387,25 @@ ros2 run livox_mid360_sim eval_accuracy.py --frames 20
 It reports the range error per surface (ground, walls, overhang, objects), missed returns
 (truth hits within 40 m but no point) and spurious returns (a point where truth hits nothing).
 
-For motion skew, drive the rig (e.g.
+For motion skew the sensor has to move: on the `rovers` branch, drive the test rig (e.g.
 `ros2 topic pub -r 20 /cmd_vel geometry_msgs/msg/Twist "{angular: {z: 1.0}}"`) and run
-`eval_accuracy.py --moving`. Truth is computed from the 1 kHz ground-truth pose
-(`/ground_truth/pose`) at each ray's timestamp. `benchmark.sh "" "range_noise:=0" …`
+`eval_accuracy.py --model test_rig --moving`. Truth is computed from the 1 kHz ground-truth
+pose (`/ground_truth/pose`) at each ray's timestamp. With your own moving model, bridge its
+gz pose (e.g. from a `PosePublisher`) to `/ground_truth/pose`. `benchmark.sh "" "range_noise:=0" …`
 measures RTF, gz CPU% and GPU load per launch configuration.
-
-## Integration into ignc-kit
-
-1. Copy **only** `src/livox_mid360_sim` into the ignc-kit workspace. **Do not copy
-   `src/livox_ros_driver2`**: ignc-kit uses the real `livox_ros_driver2`, which has the same
-   package name. Two packages with one name break the build, and the definitions are
-   identical (same type hashes), so the real one is a drop-in.
-2. In the world or robot SDF:
-   ```xml
-   <include><uri>model://livox_mid360</uri><pose>…</pose></include>
-   <joint name="livox_mount" type="fixed">
-     <parent>…your link…</parent><child>livox_mid360::lidar_link</child>
-   </joint>
-   ```
-   This is the ray-casting sensor; the world only needs the `Imu` system. For the GPU sensor,
-   use `<include><uri>model://livox_mid360_gpu</uri><name>livox_mid360</name>…</include>`
-   (same `livox_mid360::lidar_link`); the world then also needs the `Sensors` system (ogre2).
-   The model origin (`lidar_link`) is the centre of the mounting face. In URDF, use the
-   `urdf/livox_mid360.urdf.xacro` macro instead
-   (`<xacro:livox_mid360 parent="…" xyz="…" rpy="…" sensor="raycast|gpu"/>`).
-3. Bridge `/livox/points` and `/livox/imu_raw` (see `config/bridge.yaml`) and run
-   `livox_driver_emulator` (`xfer_format:=1`).
-4. FAST-LIO: `lidar_type: 1` (Livox), `lid_topic: /livox/lidar`, `imu_topic: /livox/imu`,
-   `extrinsic_T: [-0.011, -0.02329, 0.04412]`, `extrinsic_R: identity`. The old
-   `pointcloud2_to_livox` adapter is no longer needed, because `/livox/lidar` is already a
-   CustomMsg with real per-point times and lines.
 
 ## Approach 1 vs approach 2
 
-Both sensors pass `check_livox_cloud.py` headless in all three modes (default,
-`xfer_format:=0`, bare model on a pole), and run with the Gazebo GUI and RViz under
-`teleop_twist_keyboard`. Both produce the same output contract, return model and IMU.
+Both sensors pass `check_livox_cloud.py` headless on the test stand (xacro and SDF
+description, `xfer_format:=0`), and on the `rovers` branch's robots with the Gazebo GUI and
+RViz under `teleop_twist_keyboard`. Both produce the same output contract, return model and IMU.
 The development history of each is on the branches `approach-1-gpu-pattern` and
 `approach-2-exact-raycast`. A third approach (one plugin with snapshot / sliced / raycast
 modes) was tried and dropped as redundant; see
 [docs/approach-3-three-modes.md](docs/approach-3-three-modes.md).
 
 Measured on this machine: AMD Ryzen 5 2600 (6C/12T), GTX 1050 Ti 4 GB, Ubuntu 24.04, test
-world, test rig, `range_noise:=0` for accuracy.
+world, test rig (`rovers` branch), `range_noise:=0` for accuracy.
 
 | | **1: dense GPU render + pattern sampling** (`sensor:=gpu`) | **2: exact ray per pattern direction** (`sensor:=raycast`) |
 |---|---|---|
@@ -448,17 +419,17 @@ world, test rig, `range_noise:=0` for accuracy.
 | CPU (gz server, 100 % = 1 core) | 212–219 % | 119 % |
 | GPU | 17–28 % util, about +170 MiB; needs ogre2 + EGL/GPU even headless | none |
 | Code (non-blank, non-comment lines, sensor only) | ~225 (system + dense sampler) | ~710 (system + ray caster) |
-| Moving into ignc-kit | copy the package; the world needs `Sensors` (ogre2) + `Imu`; GPU required | copy the package; the world needs only `Imu`; no GPU, so it also runs on CI / in containers without EGL |
+| Adding it to a robot | copy the package; the world needs `Sensors` (ogre2) + `Imu`; GPU required | copy the package; the world needs only `Imu`; no GPU, so it also runs on CI / in containers without EGL |
 
 **Recommendation: approach 2 (exact ray casting), hence the default `sensor:=raycast`.** It is exact in geometry and in per-point
 timing, so FAST-LIO sees ideal Mid-360 data with true motion skew. It needs no GPU, uses
 about half the CPU of approach 1, and has headroom for several sensors or a 1 kHz world on
-one core. It has no side effects on physics, and integration is the same `<include>` plus
-joint. Its limits are what it hits:
+one core. It has no side effects on physics, and adding it is the same macro or `<include>`
+plus joint. Its limits are what it hits:
 
-* **Collision geometry**, not visuals. If ignc-kit's collisions are crude boxes, the cloud
+* **Collision geometry**, not visuals. If your collisions are crude boxes, the cloud
   will be too. Switch to `geometry_source:=visual` where visual meshes matter.
-* **No heightmaps.** If an ignc-kit world uses heightmap terrain, the terrain is invisible to
+* **No heightmaps.** If a world uses heightmap terrain, the terrain is invisible to
   approach 2. Either add a mesh collision for it or use approach 1 for that world.
 
 Keep approach 1 for worlds that rely on rendered-only geometry. Run it at 50 Hz, or at 100 Hz

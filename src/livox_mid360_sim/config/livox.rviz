@@ -73,7 +73,7 @@ Visualization Manager:
       Position Transformer: XYZ
   Global Options:
     Background Color: 48; 48; 48
-    Fixed Frame: odom
+    Fixed Frame: world
     Frame Rate: 30
   Name: root
   Tools:

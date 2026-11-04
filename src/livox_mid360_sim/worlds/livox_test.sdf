@@ -2,7 +2,7 @@
 <!--
   Test world for the Livox Mid-360 simulation.
   Enclosure: inner wall faces at x = +-8.9 m, y = +-6.9 m (2 m high), flat ground z = 0.
-  Overhang: slab underside at z = 2.5 m over x 1..4, y -1..1 (the robot fits under it),
+  Overhang: slab underside at z = 2.5 m over x 1..4, y -1..1 (a robot fits under it),
   which only the upper part of the +52 deg FOV sees.
 -->
 <sdf version="1.9">

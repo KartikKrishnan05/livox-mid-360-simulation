@@ -5,13 +5,13 @@
 #
 #   ros2 run livox_mid360_sim smoke_test.sh [extra launch args, e.g. xfer_format:=0]
 #
-# Env: SMOKE_FRAMES (20), SMOKE_TIMEOUT (120 s), SMOKE_GROUND_Z (-0.722, test rig;
+# Env: SMOKE_FRAMES (20), SMOKE_TIMEOUT (120 s), SMOKE_GROUND_Z (-0.547, the stand;
 #      "" disables the ground check), SMOKE_LOG (log file).
 set -u
 
 FRAMES=${SMOKE_FRAMES:-20}
 TIMEOUT=${SMOKE_TIMEOUT:-120}
-GROUND_Z=${SMOKE_GROUND_Z--0.722}
+GROUND_Z=${SMOKE_GROUND_Z--0.547}
 LOG=${SMOKE_LOG:-$(mktemp -t livox_smoke_XXXXXX.log)}
 
 LAUNCH_PID=""

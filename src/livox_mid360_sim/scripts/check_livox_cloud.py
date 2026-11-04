@@ -2,9 +2,9 @@
 """Check that the simulated Mid-360 behaves like livox_ros_driver2 on a real sensor.
 
 ros2 run livox_mid360_sim check_livox_cloud.py [--frames 20] [--timeout 90]
-    [--ground-z -0.722] [--min-points 2000]
+    [--ground-z -0.547] [--min-points 2000]
 
-Exits non-zero if any check fails. The robot should be standing still (IMU |a| ~ 1 g).
+Exits non-zero if any check fails. The sensor should be standing still (IMU |a| ~ 1 g).
 """
 import argparse
 import math
@@ -291,7 +291,7 @@ def main():
     ap.add_argument('--timeout', type=float, default=90.0, help='wall-clock seconds')
     ap.add_argument('--min-points', type=int, default=2000)
     ap.add_argument('--ground-z', type=float, default=None,
-                    help='expected ground z in livox_frame (e.g. -0.722 for the test rig)')
+                    help='expected ground z in livox_frame (e.g. -0.547 on the stand)')
     args = ap.parse_args(rclpy.utilities.remove_ros_args(sys.argv)[1:])
 
     rclpy.init()
